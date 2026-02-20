@@ -1,0 +1,25 @@
+<Window x:Class="BottomOverlay.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="BottomOverlay"
+        Width="800"
+        Height="300"
+        Left="0"
+        Top="0"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Topmost="True"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowActivated="False"
+        UseLayoutRounding="True"
+        Visibility="Hidden">
+    <Grid>
+        <Border x:Name="OverlayBorder"
+                CornerRadius="36"
+                Background="Transparent"
+                BorderThickness="0"
+                SnapsToDevicePixels="True" />
+    </Grid>
+</Window>
