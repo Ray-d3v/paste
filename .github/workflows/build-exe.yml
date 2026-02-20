@@ -1,0 +1,65 @@
+name: Build and Publish EXE
+
+on:
+  push:
+    branches:
+      - "**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore PasteWinUI/PasteWinUI.csproj
+
+      - name: Publish EXE (win-x64)
+        shell: pwsh
+        run: |
+          $outDir = Join-Path $env:GITHUB_WORKSPACE "artifacts\ci\publish\"
+          dotnet publish PasteWinUI/PasteWinUI.csproj `
+            -c Release `
+            -r win-x64 `
+            -p:SelfContained=true `
+            -p:WindowsAppSDKSelfContained=true `
+            -p:OutDir="$outDir"
+
+      - name: Verify EXE exists
+        shell: pwsh
+        run: |
+          $exePath = Join-Path $env:GITHUB_WORKSPACE "artifacts\ci\publish\PasteWinUI.exe"
+          if (-not (Test-Path $exePath)) {
+            Write-Error "PasteWinUI.exe was not generated: $exePath"
+            exit 1
+          }
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PasteWinUI-exe-${{ github.run_number }}
+          path: artifacts/ci/publish/PasteWinUI.exe
+          if-no-files-found: error
+
+      - name: Update latest release asset (main branch only)
+        if: github.ref == 'refs/heads/main'
+        uses: ncipollo/release-action@v1
+        with:
+          tag: latest
+          name: Latest Build
+          prerelease: true
+          allowUpdates: true
+          replacesArtifacts: true
+          generateReleaseNotes: true
+          artifacts: artifacts/ci/publish/PasteWinUI.exe
