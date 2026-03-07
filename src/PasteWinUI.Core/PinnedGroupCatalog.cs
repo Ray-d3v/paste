@@ -39,10 +39,10 @@ internal static class PinnedGroupCatalog
     {
         return Normalize(groupId) switch
         {
-            Quick => Color.FromArgb(255, 245, 158, 11),
-            Work => Color.FromArgb(255, 34, 197, 94),
-            Idea => Color.FromArgb(255, 96, 165, 250),
-            _ => Color.FromArgb(255, 138, 160, 175)
+            Quick => Color.FromArgb(255, 242, 183, 102),
+            Work => Color.FromArgb(255, 97, 211, 166),
+            Idea => Color.FromArgb(255, 125, 183, 255),
+            _ => Color.FromArgb(255, 126, 144, 157)
         };
     }
 }

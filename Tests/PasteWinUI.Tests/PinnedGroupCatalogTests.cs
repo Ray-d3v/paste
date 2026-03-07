@@ -33,10 +33,10 @@ public sealed class PinnedGroupCatalogTests
     }
 
     [Theory]
-    [InlineData("quick", 245, 158, 11)]
-    [InlineData("work", 34, 197, 94)]
-    [InlineData("idea", 96, 165, 250)]
-    [InlineData(null, 138, 160, 175)]
+    [InlineData("quick", 242, 183, 102)]
+    [InlineData("work", 97, 211, 166)]
+    [InlineData("idea", 125, 183, 255)]
+    [InlineData(null, 126, 144, 157)]
     public void GetColor_WhenCalled_ReturnsStableColor(string? input, byte r, byte g, byte b)
     {
         var actual = PinnedGroupCatalog.GetColor(input);

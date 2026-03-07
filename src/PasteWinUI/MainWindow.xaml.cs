@@ -1112,14 +1112,13 @@ public sealed partial class MainWindow : Window
 
         if (!isActive)
         {
-            button.Background = new SolidColorBrush(Color.FromArgb(32, 18, 22, 27));
-            button.BorderBrush = new SolidColorBrush(Color.FromArgb(90, 255, 255, 255));
+            button.Background = UiPalette.Brush(UiPalette.ElevatedSurface);
+            button.BorderBrush = UiPalette.Brush(UiPalette.StrokeSubtle);
             return;
         }
 
-        var color = GetPinnedGroupColor(groupId);
-        button.Background = new SolidColorBrush(Color.FromArgb(58, color.R, color.G, color.B));
-        button.BorderBrush = new SolidColorBrush(Color.FromArgb(165, color.R, color.G, color.B));
+        button.Background = UiPalette.Brush(UiPalette.WithAlpha(UiPalette.AccentPrimary, 24));
+        button.BorderBrush = UiPalette.Brush(UiPalette.WithAlpha(UiPalette.AccentPrimary, 170));
     }
 
     private async System.Threading.Tasks.Task<ClipboardEntry?> BuildEntryFromClipboardAsync(
@@ -2090,13 +2089,20 @@ public sealed partial class MainWindow : Window
         CardContextPasteModeButton.Content = _pasteAsPlainText ? "Paste Mode: Plain text" : "Paste Mode: As-is";
         CardContextUnpinButton.IsEnabled = !string.IsNullOrWhiteSpace(entry.PinnedGroupId);
 
-        var transparent = new SolidColorBrush(Colors.Transparent);
+        var transparent = UiPalette.Brush(Colors.Transparent);
         CardContextPinQuickButton.Background = transparent;
         CardContextPinWorkButton.Background = transparent;
         CardContextPinIdeaButton.Background = transparent;
         CardContextPinQuickButton.BorderBrush = transparent;
         CardContextPinWorkButton.BorderBrush = transparent;
         CardContextPinIdeaButton.BorderBrush = transparent;
+        CardContextRestoreButton.Foreground = UiPalette.Brush(UiPalette.AccentPrimary);
+        CardContextDeleteButton.Foreground = UiPalette.Brush(_isTrashView ? UiPalette.AccentDanger : UiPalette.AccentWarning);
+        CardContextPasteModeButton.Foreground = UiPalette.Brush(UiPalette.TextPrimary);
+        CardContextUnpinButton.Foreground = UiPalette.Brush(UiPalette.TextPrimary);
+        CardContextPinQuickButton.Foreground = UiPalette.Brush(UiPalette.TextPrimary);
+        CardContextPinWorkButton.Foreground = UiPalette.Brush(UiPalette.TextPrimary);
+        CardContextPinIdeaButton.Foreground = UiPalette.Brush(UiPalette.TextPrimary);
 
         var selectedGroup = NormalizePinnedGroupId(entry.PinnedGroupId);
         var selectedButton = selectedGroup switch
@@ -2108,9 +2114,8 @@ public sealed partial class MainWindow : Window
         };
         if (selectedButton is not null)
         {
-            var accent = GetPinnedGroupColor(selectedGroup);
-            selectedButton.Background = new SolidColorBrush(Color.FromArgb(52, accent.R, accent.G, accent.B));
-            selectedButton.BorderBrush = new SolidColorBrush(Color.FromArgb(140, accent.R, accent.G, accent.B));
+            selectedButton.Background = UiPalette.Brush(UiPalette.WithAlpha(UiPalette.AccentPrimary, 26));
+            selectedButton.BorderBrush = UiPalette.Brush(UiPalette.WithAlpha(UiPalette.AccentPrimary, 168));
         }
 
         CardContextPopup.IsOpen = false;
@@ -2404,9 +2409,9 @@ public sealed partial class MainWindow : Window
                 }
             }
 
-            _ = BringWindowToTop(targetWindow);
-            InjectEntryIntoTarget(targetWindow);
             var plainTextApplied = _pasteAsPlainText || forcePlainTextOnce;
+            _ = BringWindowToTop(targetWindow);
+            InjectEntryIntoTarget(selectedEntry, targetWindow, plainTextApplied);
             ShowToast(plainTextApplied ? "Pasted (plain text)" : "Pasted");
         }
         finally
@@ -2598,10 +2603,10 @@ public sealed partial class MainWindow : Window
         return sent == inputs.Length;
     }
 
-    private void InjectEntryIntoTarget(IntPtr targetWindow)
+    private void InjectEntryIntoTarget(ClipboardEntry entry, IntPtr targetWindow, bool plainTextApplied)
     {
         var resolvedTarget = ResolveExternalTopLevelWindow(targetWindow);
-        if (TryInjectWithAttachedThreads(resolvedTarget))
+        if (TryInjectWithAttachedThreads(entry, resolvedTarget, plainTextApplied))
         {
             return;
         }
@@ -2609,6 +2614,13 @@ public sealed partial class MainWindow : Window
         var activated = IsValidExternalWindow(resolvedTarget) && TryActivateExternalWindow(resolvedTarget);
         if (activated)
         {
+            Thread.Sleep(35);
+
+            if (TryInjectTextEntryDirectly(entry, plainTextApplied))
+            {
+                return;
+            }
+
             if (SendCtrlVKeystroke())
             {
                 return;
@@ -2636,7 +2648,7 @@ public sealed partial class MainWindow : Window
         _ = TryPostPasteMessageToTarget(resolvedTarget);
     }
 
-    private bool TryInjectWithAttachedThreads(IntPtr targetWindow)
+    private bool TryInjectWithAttachedThreads(ClipboardEntry entry, IntPtr targetWindow, bool plainTextApplied)
     {
         if (!IsValidExternalWindow(targetWindow))
         {
@@ -2687,6 +2699,13 @@ public sealed partial class MainWindow : Window
                 }
             }
 
+            Thread.Sleep(35);
+
+            if (TryInjectTextEntryDirectly(entry, plainTextApplied))
+            {
+                return true;
+            }
+
             if (SendCtrlVKeystroke())
             {
                 return true;
@@ -2718,15 +2737,18 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private bool TryInjectTextEntryDirectly(ClipboardEntry entry)
+    private bool TryInjectTextEntryDirectly(ClipboardEntry entry, bool plainTextApplied)
     {
-        if (string.Equals(entry.Kind, "Image", StringComparison.Ordinal))
+        if (!string.Equals(entry.Kind, "Text", StringComparison.Ordinal) &&
+            !string.Equals(entry.Kind, "Link", StringComparison.Ordinal))
         {
             return false;
         }
 
         var text = string.Equals(entry.Kind, "Link", StringComparison.Ordinal)
-            ? (string.IsNullOrWhiteSpace(entry.LinkUrl) ? entry.Content : entry.LinkUrl!)
+            ? (plainTextApplied
+                ? entry.Content
+                : (string.IsNullOrWhiteSpace(entry.LinkUrl) ? entry.Content : entry.LinkUrl!))
             : entry.Content;
         if (string.IsNullOrEmpty(text))
         {
@@ -3504,6 +3526,13 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        if (e.Key == Windows.System.VirtualKey.Enter)
+        {
+            OnConfirmSelectionRequested(IsAltPressed());
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key != Windows.System.VirtualKey.Escape)
         {
             return;
@@ -3782,9 +3811,12 @@ public sealed partial class MainWindow : Window
     private void UpdateTrashToggleVisualState()
     {
         TrashToggleButton.Opacity = _isTrashView ? 1.0 : 0.82;
-        TrashToggleButton.BorderBrush = _isTrashView
-            ? new SolidColorBrush(Color.FromArgb(220, 255, 180, 105))
-            : new SolidColorBrush(Color.FromArgb(90, 255, 255, 255));
+        TrashToggleButton.Background = UiPalette.Brush(_isTrashView
+            ? UiPalette.WithAlpha(UiPalette.AccentWarning, 28)
+            : UiPalette.ElevatedSurface);
+        TrashToggleButton.BorderBrush = UiPalette.Brush(_isTrashView
+            ? UiPalette.AccentWarning
+            : UiPalette.StrokeSubtle);
     }
 
     private void UpdateEmptyState()
@@ -3905,8 +3937,8 @@ public sealed partial class MainWindow : Window
 
         var shellBorder = new Border
         {
-            Background = new SolidColorBrush(Color.FromArgb(236, 20, 25, 31)),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(125, 255, 255, 255)),
+            Background = UiPalette.Brush(UiPalette.PopupSurface),
+            BorderBrush = UiPalette.Brush(UiPalette.StrokeStrong),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(16),
             Padding = new Thickness(16, 14, 16, 12)
@@ -3927,12 +3959,12 @@ public sealed partial class MainWindow : Window
                 Text = "Command Palette",
                 FontSize = 18,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(Color.FromArgb(246, 245, 248, 252))
+                Foreground = UiPalette.Brush(UiPalette.TextPrimary)
             });
         var hint = new Border
         {
-            Background = new SolidColorBrush(Color.FromArgb(50, 255, 180, 105)),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(130, 255, 180, 105)),
+            Background = UiPalette.Brush(UiPalette.WithAlpha(UiPalette.ElevatedSurface, 214)),
+            BorderBrush = UiPalette.Brush(UiPalette.StrokeSubtle),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(10, 4, 10, 4),
@@ -3940,7 +3972,7 @@ public sealed partial class MainWindow : Window
             {
                 Text = "Ctrl+K",
                 FontSize = 11.5,
-                Foreground = new SolidColorBrush(Color.FromArgb(240, 255, 214, 168))
+                Foreground = UiPalette.Brush(UiPalette.TextPrimary)
             }
         };
         Grid.SetColumn(hint, 1);
@@ -3952,14 +3984,14 @@ public sealed partial class MainWindow : Window
         {
             PlaceholderText = "Type a command (trash, paste, undo)...",
             MinHeight = 40,
-            BorderBrush = new SolidColorBrush(Color.FromArgb(140, 255, 255, 255)),
-            Background = new SolidColorBrush(Color.FromArgb(90, 10, 14, 19)),
-            Foreground = new SolidColorBrush(Color.FromArgb(245, 245, 247, 250)),
+            BorderBrush = UiPalette.Brush(UiPalette.StrokeStrong),
+            Background = UiPalette.Brush(UiPalette.ElevatedSurface),
+            Foreground = UiPalette.Brush(UiPalette.TextPrimary),
             Padding = new Thickness(12, 6, 12, 6),
             Margin = new Thickness(0, 10, 0, 10)
         };
-        queryBox.Resources["TextControlBorderBrushFocused"] = new SolidColorBrush(Color.FromArgb(255, 242, 177, 109));
-        queryBox.Resources["TextControlBorderBrushPointerOver"] = new SolidColorBrush(Color.FromArgb(190, 255, 255, 255));
+        queryBox.Resources["TextControlBorderBrushFocused"] = UiPalette.Brush(UiPalette.FocusRing);
+        queryBox.Resources["TextControlBorderBrushPointerOver"] = UiPalette.Brush(UiPalette.AccentPrimaryHover);
         Grid.SetRow(queryBox, 1);
         rootPanel.Children.Add(queryBox);
 
@@ -3967,8 +3999,8 @@ public sealed partial class MainWindow : Window
         {
             SelectionMode = ListViewSelectionMode.Single,
             IsItemClickEnabled = true,
-            Background = new SolidColorBrush(Color.FromArgb(24, 255, 255, 255)),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(60, 255, 255, 255)),
+            Background = UiPalette.Brush(UiPalette.WithAlpha(UiPalette.ElevatedSurface, 214)),
+            BorderBrush = UiPalette.Brush(UiPalette.StrokeSubtle),
             BorderThickness = new Thickness(1),
             Padding = new Thickness(8)
         };
@@ -3979,7 +4011,7 @@ public sealed partial class MainWindow : Window
         {
             Text = "Enter: Run  •  Esc: Close  •  Alt+Enter: One-time plain paste",
             FontSize = 11,
-            Foreground = new SolidColorBrush(Color.FromArgb(175, 210, 218, 228)),
+            Foreground = UiPalette.Brush(UiPalette.TextMuted),
             Margin = new Thickness(2, 10, 2, 0)
         };
         Grid.SetRow(helpText, 3);
@@ -4056,7 +4088,7 @@ public sealed partial class MainWindow : Window
                     Text = title,
                     FontSize = 11,
                     FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                    Foreground = new SolidColorBrush(Color.FromArgb(165, 170, 179, 191))
+                    Foreground = UiPalette.Brush(UiPalette.TextMuted)
                 }
             };
         }
@@ -4064,8 +4096,8 @@ public sealed partial class MainWindow : Window
         ListViewItem CreateActionItem(CommandPaletteActionItem item)
         {
             var severityColor = item.Severity == CommandPaletteSeverity.Warning
-                ? Color.FromArgb(230, 255, 198, 122)
-                : Color.FromArgb(232, 240, 245, 250);
+                ? UiPalette.AccentWarning
+                : UiPalette.TextPrimary;
 
             var row = new Grid
             {
@@ -4078,9 +4110,9 @@ public sealed partial class MainWindow : Window
             var accentBar = new Border
             {
                 CornerRadius = new CornerRadius(2),
-                Background = new SolidColorBrush(item.Severity == CommandPaletteSeverity.Warning
-                    ? Color.FromArgb(255, 204, 122, 58)
-                    : Color.FromArgb(255, 242, 177, 109))
+                Background = UiPalette.Brush(item.Severity == CommandPaletteSeverity.Warning
+                    ? UiPalette.AccentWarning
+                    : UiPalette.StrokeStrong)
             };
             Grid.SetColumn(accentBar, 0);
             row.Children.Add(accentBar);
@@ -4095,7 +4127,7 @@ public sealed partial class MainWindow : Window
                 Text = item.Title,
                 FontSize = 14.5,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(severityColor)
+                Foreground = UiPalette.Brush(severityColor)
             });
             textCol.Children.Add(new TextBlock
             {
@@ -4104,14 +4136,14 @@ public sealed partial class MainWindow : Window
                 MaxLines = 2,
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 TextWrapping = TextWrapping.WrapWholeWords,
-                Foreground = new SolidColorBrush(Color.FromArgb(195, 205, 214, 225))
+                Foreground = UiPalette.Brush(UiPalette.TextSecondary)
             });
             row.Children.Add(textCol);
 
             var shortcutBadge = new Border
             {
-                Background = new SolidColorBrush(Color.FromArgb(42, 255, 255, 255)),
-                BorderBrush = new SolidColorBrush(Color.FromArgb(90, 255, 255, 255)),
+                Background = UiPalette.Brush(UiPalette.ElevatedSurface),
+                BorderBrush = UiPalette.Brush(UiPalette.StrokeSubtle),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(7),
                 Padding = new Thickness(9, 4, 9, 4),
@@ -4120,7 +4152,7 @@ public sealed partial class MainWindow : Window
                 {
                     Text = item.Shortcut,
                     FontSize = 10.5,
-                    Foreground = new SolidColorBrush(Color.FromArgb(220, 228, 235, 244))
+                    Foreground = UiPalette.Brush(UiPalette.TextSecondary)
                 }
             };
             Grid.SetColumn(shortcutBadge, 2);
@@ -4133,7 +4165,7 @@ public sealed partial class MainWindow : Window
                 Margin = new Thickness(0, 3, 0, 3),
                 Padding = new Thickness(10, 7, 10, 7),
                 CornerRadius = new CornerRadius(8),
-                Background = new SolidColorBrush(Color.FromArgb(24, 255, 255, 255))
+                Background = UiPalette.Brush(UiPalette.WithAlpha(UiPalette.ElevatedSurface, 196))
             };
         }
 
@@ -4154,13 +4186,13 @@ public sealed partial class MainWindow : Window
                             Text = "No commands found",
                             FontSize = 13,
                             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                            Foreground = new SolidColorBrush(Color.FromArgb(230, 244, 248, 252))
+                            Foreground = UiPalette.Brush(UiPalette.TextPrimary)
                         },
                         new TextBlock
                         {
                             Text = "Try: trash, paste, undo, search",
                             FontSize = 11.5,
-                            Foreground = new SolidColorBrush(Color.FromArgb(190, 205, 214, 225))
+                            Foreground = UiPalette.Brush(UiPalette.TextSecondary)
                         }
                     }
                 }
@@ -4569,12 +4601,12 @@ public sealed partial class MainWindow : Window
     {
         var cardIndex = _cards.Count;
         var isLinkCard = entry.Kind == "Link";
-        var cardSurfaceColor = Color.FromArgb(238, 22, 27, 32);
-        var cardSurfaceHoverColor = Color.FromArgb(248, 28, 34, 41);
-        var cardBorderDefaultColor = Color.FromArgb(56, 255, 255, 255);
-        var cardBorderHoverColor = Color.FromArgb(140, 255, 180, 105);
-        var cardSurfaceBrush = new SolidColorBrush(cardSurfaceColor);
-        var cardBorderBrush = new SolidColorBrush(cardBorderDefaultColor);
+        var cardSurfaceColor = UiPalette.CardSurface;
+        var cardSurfaceHoverColor = UiPalette.CardSurfaceHover;
+        var cardBorderDefaultColor = UiPalette.StrokeSubtle;
+        var cardBorderHoverColor = UiPalette.StrokeStrong;
+        var cardSurfaceBrush = UiPalette.Brush(cardSurfaceColor);
+        var cardBorderBrush = UiPalette.Brush(cardBorderDefaultColor);
 
         var card = new Border
         {
@@ -4633,8 +4665,8 @@ public sealed partial class MainWindow : Window
         var selectionOutline = new Border
         {
             CornerRadius = new CornerRadius(18),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(255, 255, 180, 105)),
-            BorderThickness = new Thickness(2),
+            BorderBrush = UiPalette.Brush(UiPalette.WithAlpha(UiPalette.AccentPrimary, 212)),
+            BorderThickness = new Thickness(1.5),
             Margin = new Thickness(0),
             Opacity = 0.0,
             IsHitTestVisible = false
@@ -4675,7 +4707,7 @@ public sealed partial class MainWindow : Window
                 : entry.Kind,
             FontSize = headerKindFontSize,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Color.FromArgb(230, 255, 255, 255)),
+            Foreground = UiPalette.Brush(UiPalette.TextPrimary),
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(headerTextOffset, 0, 0, 0)
         });
@@ -4683,7 +4715,7 @@ public sealed partial class MainWindow : Window
         {
             Text = FormatAgo(entry.CopiedAtUtc),
             FontSize = headerAgoFontSize,
-            Foreground = new SolidColorBrush(Color.FromArgb(180, 255, 255, 255)),
+            Foreground = UiPalette.Brush(UiPalette.WithAlpha(UiPalette.TextPrimary, 190)),
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(headerTextOffset, 0, 0, 0)
         };
@@ -4769,7 +4801,7 @@ public sealed partial class MainWindow : Window
                 TextTrimming = TextTrimming.None,
                 FontSize = 13,
                 LineHeight = 20,
-                Foreground = new SolidColorBrush(Color.FromArgb(220, 245, 245, 245)),
+                Foreground = UiPalette.Brush(UiPalette.TextPrimary),
                 Opacity = 1.0,
                 VerticalAlignment = VerticalAlignment.Top
             };
@@ -4794,7 +4826,7 @@ public sealed partial class MainWindow : Window
         {
             Text = footerText,
             FontSize = 11,
-            Foreground = new SolidColorBrush(Color.FromArgb(224, 236, 240, 245)),
+            Foreground = UiPalette.Brush(UiPalette.TextSecondary),
             HorizontalAlignment = HorizontalAlignment.Center,
             TextAlignment = TextAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
@@ -4807,7 +4839,7 @@ public sealed partial class MainWindow : Window
         {
             imageSizeBadge = new Border
             {
-                Background = new SolidColorBrush(Color.FromArgb(176, 20, 26, 32)),
+                Background = UiPalette.Brush(UiPalette.WithAlpha(UiPalette.PopupSurface, 220)),
                 CornerRadius = new CornerRadius(9),
                 Padding = new Thickness(8, 2, 8, 2),
                 MinHeight = footerLabelHeight,
@@ -4908,7 +4940,7 @@ public sealed partial class MainWindow : Window
             Text = title,
             FontSize = 10.5,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Color.FromArgb(238, 245, 247, 250)),
+            Foreground = UiPalette.Brush(UiPalette.TextPrimary),
             TextWrapping = TextWrapping.NoWrap,
             TextTrimming = TextTrimming.CharacterEllipsis,
             Margin = new Thickness(1, 0, 0, 0)
@@ -4918,7 +4950,7 @@ public sealed partial class MainWindow : Window
         {
             Text = linkUrl,
             FontSize = 9.0,
-            Foreground = new SolidColorBrush(Color.FromArgb(208, 218, 225, 234)),
+            Foreground = UiPalette.Brush(UiPalette.TextSecondary),
             TextWrapping = TextWrapping.NoWrap,
             TextTrimming = TextTrimming.CharacterEllipsis,
             Margin = new Thickness(1, 0, 0, 0)
@@ -4936,7 +4968,7 @@ public sealed partial class MainWindow : Window
 
         return new Border
         {
-            Background = new SolidColorBrush(Color.FromArgb(238, 23, 29, 35)),
+            Background = UiPalette.Brush(UiPalette.ElevatedSurface),
             CornerRadius = new CornerRadius(0, 0, 17, 17),
             Child = content
         };
@@ -4957,7 +4989,7 @@ public sealed partial class MainWindow : Window
         {
             Text = host,
             FontSize = 10,
-            Foreground = new SolidColorBrush(Color.FromArgb(180, 255, 255, 255)),
+            Foreground = UiPalette.Brush(UiPalette.WithAlpha(UiPalette.TextPrimary, 184)),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Bottom,
             Margin = new Thickness(8, 0, 8, 8),
@@ -4974,7 +5006,7 @@ public sealed partial class MainWindow : Window
                 Text = initial,
                 FontSize = 46,
                 FontWeight = Microsoft.UI.Text.FontWeights.Bold,
-                Foreground = new SolidColorBrush(Color.FromArgb(238, 255, 255, 255)),
+                Foreground = UiPalette.Brush(UiPalette.TextPrimary),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(0, -4, 0, 0)
@@ -4989,15 +5021,7 @@ public sealed partial class MainWindow : Window
     private static Color GetLinkPlaceholderColor(string host)
     {
         var hash = GetStableHash(host.ToLowerInvariant());
-        var palette = new[]
-        {
-            Color.FromArgb(255, 47, 79, 109),
-            Color.FromArgb(255, 77, 64, 122),
-            Color.FromArgb(255, 44, 88, 74),
-            Color.FromArgb(255, 88, 63, 63),
-            Color.FromArgb(255, 62, 72, 94),
-            Color.FromArgb(255, 70, 70, 70)
-        };
+        var palette = UiPalette.LinkPlaceholderPalette;
         return palette[Math.Abs(hash % palette.Length)];
     }
 

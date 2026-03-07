@@ -23,9 +23,9 @@
                 RadiusY="22">
                 <Rectangle.Fill>
                     <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                        <GradientStop Color="#DD171C22" Offset="0.00" />
-                        <GradientStop Color="#D7151A20" Offset="0.55" />
-                        <GradientStop Color="#E01A2028" Offset="1.00" />
+                        <GradientStop Color="#E111161B" Offset="0.00" />
+                        <GradientStop Color="#E3141A20" Offset="0.50" />
+                        <GradientStop Color="#EC171D23" Offset="1.00" />
                     </LinearGradientBrush>
                 </Rectangle.Fill>
             </Rectangle>
@@ -33,16 +33,16 @@
                 IsHitTestVisible="False"
                 RadiusX="22"
                 RadiusY="22"
-                Fill="#16FFFFFF" />
+                Fill="#07273339" />
             <Rectangle
                 IsHitTestVisible="False"
                 RadiusX="22"
                 RadiusY="22">
                 <Rectangle.Fill>
                     <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                        <GradientStop Color="#16000000" Offset="0.00" />
-                        <GradientStop Color="#04000000" Offset="0.35" />
-                        <GradientStop Color="#20000000" Offset="1.00" />
+                        <GradientStop Color="#06000000" Offset="0.00" />
+                        <GradientStop Color="#00000000" Offset="0.28" />
+                        <GradientStop Color="#24000000" Offset="1.00" />
                     </LinearGradientBrush>
                 </Rectangle.Fill>
             </Rectangle>
@@ -68,8 +68,8 @@
                     HorizontalContentAlignment="Center"
                     VerticalContentAlignment="Center"
                     CornerRadius="14"
-                    Background="#2012161B"
-                    BorderBrush="#5AFFFFFF"
+                    Background="#FF0F1418"
+                    BorderBrush="#FF2A343E"
                     BorderThickness="1"
                     Click="SearchToggleButton_Click">
                     <FontIcon
@@ -77,7 +77,7 @@
                         FontFamily="Segoe MDL2 Assets"
                         FontSize="11"
                         Margin="-1,0,0,0"
-                        Foreground="#F4F7F8FA" />
+                        Foreground="#FFF3F4F1" />
                 </Button>
                 <StackPanel
                     x:Name="PinnedGroupTabs"
@@ -89,13 +89,13 @@
                         Height="28"
                         Padding="8,0,8,0"
                         CornerRadius="14"
-                        Background="#2012161B"
-                        BorderBrush="#5AFFFFFF"
+                        Background="#FF0F1418"
+                        BorderBrush="#FF2A343E"
                         BorderThickness="1"
                         Click="PinnedGroupFilterButton_Click">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Ellipse Width="7" Height="7" Fill="#8AA0AF" VerticalAlignment="Center" />
-                            <TextBlock Text="All" FontSize="11.5" FontWeight="SemiBold" Foreground="#F4F7F8FA" />
+                            <Ellipse Width="7" Height="7" Fill="#FF7A858F" VerticalAlignment="Center" />
+                            <TextBlock Text="All" FontSize="11.5" FontWeight="SemiBold" Foreground="#FFF3F4F1" />
                         </StackPanel>
                     </Button>
                     <Button
@@ -104,13 +104,13 @@
                         Height="28"
                         Padding="8,0,8,0"
                         CornerRadius="14"
-                        Background="#2012161B"
-                        BorderBrush="#5AFFFFFF"
+                        Background="#FF0F1418"
+                        BorderBrush="#FF2A343E"
                         BorderThickness="1"
                         Click="PinnedGroupFilterButton_Click">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Ellipse Width="7" Height="7" Fill="#F59E0B" VerticalAlignment="Center" />
-                            <TextBlock Text="Quick" FontSize="11.5" FontWeight="SemiBold" Foreground="#F4F7F8FA" />
+                            <Ellipse Width="7" Height="7" Fill="#FFC4A06B" VerticalAlignment="Center" />
+                            <TextBlock Text="Quick" FontSize="11.5" FontWeight="SemiBold" Foreground="#FFF3F4F1" />
                         </StackPanel>
                     </Button>
                     <Button
@@ -119,13 +119,13 @@
                         Height="28"
                         Padding="8,0,8,0"
                         CornerRadius="14"
-                        Background="#2012161B"
-                        BorderBrush="#5AFFFFFF"
+                        Background="#FF0F1418"
+                        BorderBrush="#FF2A343E"
                         BorderThickness="1"
                         Click="PinnedGroupFilterButton_Click">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Ellipse Width="7" Height="7" Fill="#22C55E" VerticalAlignment="Center" />
-                            <TextBlock Text="Work" FontSize="11.5" FontWeight="SemiBold" Foreground="#F4F7F8FA" />
+                            <Ellipse Width="7" Height="7" Fill="#FF7FB59D" VerticalAlignment="Center" />
+                            <TextBlock Text="Work" FontSize="11.5" FontWeight="SemiBold" Foreground="#FFF3F4F1" />
                         </StackPanel>
                     </Button>
                     <Button
@@ -134,13 +134,13 @@
                         Height="28"
                         Padding="8,0,8,0"
                         CornerRadius="14"
-                        Background="#2012161B"
-                        BorderBrush="#5AFFFFFF"
+                        Background="#FF0F1418"
+                        BorderBrush="#FF2A343E"
                         BorderThickness="1"
                         Click="PinnedGroupFilterButton_Click">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Ellipse Width="7" Height="7" Fill="#60A5FA" VerticalAlignment="Center" />
-                            <TextBlock Text="Idea" FontSize="11.5" FontWeight="SemiBold" Foreground="#F4F7F8FA" />
+                            <Ellipse Width="7" Height="7" Fill="#FF88A9C9" VerticalAlignment="Center" />
+                            <TextBlock Text="Idea" FontSize="11.5" FontWeight="SemiBold" Foreground="#FFF3F4F1" />
                         </StackPanel>
                     </Button>
                 </StackPanel>
@@ -154,13 +154,13 @@
                     Visibility="Collapsed"
                     Opacity="0"
                     CornerRadius="19"
-                    BorderBrush="#88FFFFFF"
+                    BorderBrush="#FF394651"
                     BorderThickness="1">
                     <Border.Background>
                         <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                            <GradientStop Color="#E11B2026" Offset="0.00" />
-                            <GradientStop Color="#E91A1F25" Offset="0.50" />
-                            <GradientStop Color="#F01A2028" Offset="1.00" />
+                            <GradientStop Color="#F0171D23" Offset="0.00" />
+                            <GradientStop Color="#F0182027" Offset="0.55" />
+                            <GradientStop Color="#F11A2229" Offset="1.00" />
                         </LinearGradientBrush>
                     </Border.Background>
                     <Border.RenderTransform>
@@ -183,7 +183,7 @@
                             Glyph="&#xE721;"
                             FontFamily="Segoe MDL2 Assets"
                             FontSize="12"
-                            Foreground="#DDE6EBF1"
+                            Foreground="#FFB5BEC6"
                             HorizontalAlignment="Center"
                             VerticalAlignment="Center" />
 
@@ -197,22 +197,22 @@
                             VerticalContentAlignment="Center"
                             Padding="2,0,0,0"
                             PlaceholderText="Search clipboard history"
-                            Background="#2A0F141A"
-                            BorderBrush="#7AD9E1EA"
+                            Background="#FF0E1317"
+                            BorderBrush="#FF394651"
                             BorderThickness="1"
-                            Foreground="#F6FAFD"
+                            Foreground="#FFF3F4F1"
                             IsEnabled="False"
                             TextChanged="SearchTextBox_TextChanged"
                             KeyDown="SearchTextBox_KeyDown">
                             <TextBox.Resources>
                                 <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
-                                <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#3810181E" />
-                                <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#200A0F15" />
+                                <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#FF151C22" />
+                                <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#FF171D23" />
                                 <SolidColorBrush x:Key="TextControlBackgroundDisabled" Color="Transparent" />
-                                <SolidColorBrush x:Key="TextControlBorderBrush" Color="#7AD9E1EA" />
-                                <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#FFF2B16D" />
-                                <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#CCFFFFFF" />
-                                <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="#B8DCE1E8" />
+                                <SolidColorBrush x:Key="TextControlBorderBrush" Color="#FF394651" />
+                                <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#FF8FC2BE" />
+                                <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#FF74BEB8" />
+                                <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="#FF818D99" />
                             </TextBox.Resources>
                         </TextBox>
 
@@ -226,8 +226,8 @@
                             VerticalAlignment="Center"
                             HorizontalContentAlignment="Center"
                             VerticalContentAlignment="Center"
-                            Background="#2A0F141A"
-                            BorderBrush="#7AD9E1EA"
+                            Background="#FF0E1317"
+                            BorderBrush="#FF394651"
                             BorderThickness="1"
                             CornerRadius="12"
                             Click="SearchCloseButton_Click">
@@ -235,7 +235,7 @@
                                 Glyph="&#xE711;"
                                 FontFamily="Segoe MDL2 Assets"
                                 FontSize="10"
-                                Foreground="#DDE6EBF1" />
+                                Foreground="#FFB5BEC6" />
                         </Button>
                     </Grid>
                 </Border>
@@ -252,15 +252,15 @@
                 HorizontalContentAlignment="Center"
                 VerticalContentAlignment="Center"
                 CornerRadius="14"
-                Background="#2012161B"
-                BorderBrush="#5AFFFFFF"
+                Background="#FF0F1418"
+                BorderBrush="#FF2A343E"
                 BorderThickness="1"
                 Click="TrashToggleButton_Click">
                 <FontIcon
                     Glyph="&#xE74D;"
                     FontFamily="Segoe MDL2 Assets"
                     FontSize="12"
-                    Foreground="#F4F7F8FA" />
+                    Foreground="#FFF3F4F1" />
             </Button>
 
             <ScrollViewer
@@ -302,8 +302,8 @@
                 Padding="18,14"
                 CornerRadius="14"
                 Visibility="Collapsed"
-                Background="#B2181C22"
-                BorderBrush="#66FFFFFF"
+                Background="#FF171D23"
+                BorderBrush="#FF394651"
                 BorderThickness="1"
                 IsHitTestVisible="False">
                 <StackPanel Spacing="6">
@@ -312,12 +312,12 @@
                         Text="No clipboard items yet"
                         FontSize="15"
                         FontWeight="SemiBold"
-                        Foreground="#F4F7F8FA" />
+                        Foreground="#FFF3F4F1" />
                     <TextBlock
                         x:Name="EmptyStateBodyText"
                         Text="Copy something and open with Ctrl+Alt+V. Use Ctrl+F to search."
                         FontSize="12.5"
-                        Foreground="#CCDEE2E8"
+                        Foreground="#FFB5BEC6"
                         TextWrapping="WrapWholeWords" />
                 </StackPanel>
             </Border>
@@ -330,8 +330,8 @@
                     Spacing="0"
                     MaxWidth="460">
                     <Border
-                        Background="#E6181B20"
-                        BorderBrush="#66FFFFFF"
+                        Background="#FF1B2229"
+                        BorderBrush="#FF394651"
                         BorderThickness="1"
                         CornerRadius="14"
                         Padding="14,12,14,12">
@@ -340,7 +340,7 @@
                                 x:Name="CardPreviewTitleText"
                                 FontSize="12"
                                 FontWeight="SemiBold"
-                                Foreground="#F4F7F8FA"
+                                Foreground="#FFF3F4F1"
                                 TextTrimming="CharacterEllipsis"
                                 MaxLines="1" />
                             <Image
@@ -356,7 +356,7 @@
                                 <TextBlock
                                     x:Name="CardPreviewBodyText"
                                     FontSize="13"
-                                    Foreground="#CCDEE2E8"
+                                    Foreground="#FFB5BEC6"
                                     TextWrapping="WrapWholeWords"
                                     LineHeight="20" />
                             </ScrollViewer>
@@ -364,8 +364,8 @@
                     </Border>
                     <Polygon
                         Points="0,0 14,0 7,8"
-                        Fill="#E6181B20"
-                        Stroke="#66FFFFFF"
+                        Fill="#FF1B2229"
+                        Stroke="#FF394651"
                         StrokeThickness="1"
                         HorizontalAlignment="Center"
                         Margin="0,-1,0,0" />
@@ -378,8 +378,8 @@
                 Closed="CardContextPopup_Closed">
                 <Border
                     x:Name="CardContextPopupPanel"
-                    Background="#E6181B20"
-                    BorderBrush="#66FFFFFF"
+                    Background="#FF1B2229"
+                    BorderBrush="#FF394651"
                     BorderThickness="1"
                     CornerRadius="10"
                     Padding="6">
@@ -395,7 +395,7 @@
                             Background="Transparent"
                             BorderThickness="1"
                             BorderBrush="Transparent"
-                            Foreground="#F4F7F8FA"
+                            Foreground="#FFF3F4F1"
                             Click="CardContextPinQuickButton_Click" />
                         <Button
                             x:Name="CardContextPinWorkButton"
@@ -408,7 +408,7 @@
                             Background="Transparent"
                             BorderThickness="1"
                             BorderBrush="Transparent"
-                            Foreground="#F4F7F8FA"
+                            Foreground="#FFF3F4F1"
                             Click="CardContextPinWorkButton_Click" />
                         <Button
                             x:Name="CardContextPinIdeaButton"
@@ -421,7 +421,7 @@
                             Background="Transparent"
                             BorderThickness="1"
                             BorderBrush="Transparent"
-                            Foreground="#F4F7F8FA"
+                            Foreground="#FFF3F4F1"
                             Click="CardContextPinIdeaButton_Click" />
                         <Button
                             x:Name="CardContextUnpinButton"
@@ -434,7 +434,7 @@
                             Background="Transparent"
                             BorderThickness="1"
                             BorderBrush="Transparent"
-                            Foreground="#F4F7F8FA"
+                            Foreground="#FFF3F4F1"
                             Click="CardContextUnpinButton_Click" />
                         <Button
                             x:Name="CardContextPasteModeButton"
@@ -447,7 +447,7 @@
                             Background="Transparent"
                             BorderThickness="1"
                             BorderBrush="Transparent"
-                            Foreground="#F4F7F8FA"
+                            Foreground="#FFF3F4F1"
                             Click="CardContextPasteModeButton_Click" />
                         <Button
                             x:Name="CardContextRestoreButton"
@@ -460,7 +460,7 @@
                             Background="Transparent"
                             BorderThickness="1"
                             BorderBrush="Transparent"
-                            Foreground="#F4F7F8FA"
+                            Foreground="#FFF3F4F1"
                             Visibility="Collapsed"
                             Click="CardContextRestoreButton_Click" />
                         <Button
@@ -474,7 +474,7 @@
                             Background="Transparent"
                             BorderThickness="1"
                             BorderBrush="Transparent"
-                            Foreground="#F4F7F8FA"
+                            Foreground="#FFF3F4F1"
                             Click="CardContextDeleteButton_Click" />
                     </StackPanel>
                 </Border>
@@ -488,8 +488,8 @@
                 Padding="12,8"
                 CornerRadius="10"
                 Visibility="Collapsed"
-                Background="#EA1A2028"
-                BorderBrush="#7AFFFFFF"
+                Background="#FF171D23"
+                BorderBrush="#FF394651"
                 BorderThickness="1">
                 <Grid ColumnSpacing="10">
                     <Grid.ColumnDefinitions>
@@ -501,7 +501,7 @@
                         Grid.Column="0"
                         VerticalAlignment="Center"
                         FontSize="12.5"
-                        Foreground="#F4F7F8FA"
+                        Foreground="#FFF3F4F1"
                         Text="Done" />
                     <Button
                         x:Name="ToastActionButton"
@@ -510,10 +510,10 @@
                         MinWidth="64"
                         CornerRadius="8"
                         Visibility="Collapsed"
-                        Background="#2A0F141A"
-                        BorderBrush="#7AD9E1EA"
+                        Background="#FF0F1418"
+                        BorderBrush="#FF394651"
                         BorderThickness="1"
-                        Foreground="#F4F7F8FA"
+                        Foreground="#FFF3F4F1"
                         Click="ToastActionButton_Click"
                         Content="Undo" />
                 </Grid>
