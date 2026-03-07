@@ -149,18 +149,18 @@
                 <Border
                     x:Name="SearchBarShell"
                     Width="330"
-                    Height="38"
+                    Height="40"
                     HorizontalAlignment="Center"
                     Visibility="Collapsed"
                     Opacity="0"
-                    CornerRadius="19"
-                    BorderBrush="#FF394651"
+                    CornerRadius="20"
+                    BorderBrush="#FF313C46"
                     BorderThickness="1">
                     <Border.Background>
                         <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                            <GradientStop Color="#F0171D23" Offset="0.00" />
-                            <GradientStop Color="#F0182027" Offset="0.55" />
-                            <GradientStop Color="#F11A2229" Offset="1.00" />
+                            <GradientStop Color="#F0161B20" Offset="0.00" />
+                            <GradientStop Color="#F0171D23" Offset="0.55" />
+                            <GradientStop Color="#F0192026" Offset="1.00" />
                         </LinearGradientBrush>
                     </Border.Background>
                     <Border.RenderTransform>
@@ -169,9 +169,9 @@
                             ScaleX="0.65"
                             ScaleY="0.96"
                             CenterX="165"
-                            CenterY="19" />
+                            CenterY="20" />
                     </Border.RenderTransform>
-                    <Grid Padding="10,0,8,0" VerticalAlignment="Center">
+                    <Grid Padding="12,0,10,0" VerticalAlignment="Center">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
@@ -190,52 +190,59 @@
                         <TextBox
                             x:Name="SearchTextBox"
                             Grid.Column="1"
-                            Margin="8,3,0,3"
-                            MinHeight="26"
+                            Margin="10,2,0,-2"
+                            MinHeight="22"
                             HorizontalAlignment="Stretch"
                             VerticalAlignment="Center"
                             VerticalContentAlignment="Center"
-                            Padding="2,0,0,0"
+                            Padding="0,3,0,0"
                             PlaceholderText="Search clipboard history"
-                            Background="#FF0E1317"
-                            BorderBrush="#FF394651"
-                            BorderThickness="1"
-                            Foreground="#FFF3F4F1"
+                            PlaceholderForeground="#FFE5E7EB"
+                            Background="Transparent"
+                            BorderBrush="Transparent"
+                            BorderThickness="0"
+                            Foreground="#FFFFFFFF"
                             IsEnabled="False"
                             TextChanged="SearchTextBox_TextChanged"
                             KeyDown="SearchTextBox_KeyDown">
                             <TextBox.Resources>
                                 <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
-                                <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#FF151C22" />
-                                <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#FF171D23" />
+                                <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
                                 <SolidColorBrush x:Key="TextControlBackgroundDisabled" Color="Transparent" />
-                                <SolidColorBrush x:Key="TextControlBorderBrush" Color="#FF394651" />
-                                <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#FF8FC2BE" />
-                                <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#FF74BEB8" />
-                                <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="#FF818D99" />
+                                <SolidColorBrush x:Key="TextControlForeground" Color="#FFFFFFFF" />
+                                <SolidColorBrush x:Key="TextControlForegroundFocused" Color="#FFFFFFFF" />
+                                <SolidColorBrush x:Key="TextControlForegroundPointerOver" Color="#FFFFFFFF" />
+                                <SolidColorBrush x:Key="TextControlForegroundDisabled" Color="#FF9AA5AF" />
+                                <SolidColorBrush x:Key="TextControlBorderBrush" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="#FFE5E7EB" />
+                                <Thickness x:Key="TextControlBorderThemeThickness">0</Thickness>
+                                <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
                             </TextBox.Resources>
                         </TextBox>
 
                         <Button
                             x:Name="SearchCloseButton"
                             Grid.Column="2"
-                            Width="24"
-                            Height="24"
+                            Width="22"
+                            Height="22"
                             Padding="0"
                             HorizontalAlignment="Center"
                             VerticalAlignment="Center"
                             HorizontalContentAlignment="Center"
                             VerticalContentAlignment="Center"
-                            Background="#FF0E1317"
-                            BorderBrush="#FF394651"
-                            BorderThickness="1"
-                            CornerRadius="12"
+                            Background="Transparent"
+                            BorderBrush="Transparent"
+                            BorderThickness="0"
+                            CornerRadius="11"
                             Click="SearchCloseButton_Click">
                             <FontIcon
                                 Glyph="&#xE711;"
                                 FontFamily="Segoe MDL2 Assets"
                                 FontSize="10"
-                                Foreground="#FFB5BEC6" />
+                                Foreground="#FF8A97A2" />
                         </Button>
                     </Grid>
                 </Border>
