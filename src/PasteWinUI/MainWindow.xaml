@@ -53,14 +53,19 @@
                 HorizontalAlignment="Center"
                 VerticalAlignment="Top"
                 Margin="20,12,20,0">
-                <StackPanel
+                <Grid
                     x:Name="SearchCompactControls"
-                    Orientation="Horizontal"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
-                    Spacing="8">
+                    ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
                 <Button
                     x:Name="SearchToggleButton"
+                    Grid.Column="0"
                     Width="28"
                     Height="28"
                     Padding="0"
@@ -79,72 +84,43 @@
                         Margin="-1,0,0,0"
                         Foreground="#FFF3F4F1" />
                 </Button>
-                <StackPanel
-                    x:Name="PinnedGroupTabs"
-                    Orientation="Horizontal"
-                    Spacing="6">
-                    <Button
-                        x:Name="PinnedGroupAllButton"
-                        Tag="all"
-                        Height="28"
-                        Padding="8,0,8,0"
-                        CornerRadius="14"
-                        Background="#FF0F1418"
-                        BorderBrush="#FF2A343E"
-                        BorderThickness="1"
-                        Click="PinnedGroupFilterButton_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Ellipse Width="7" Height="7" Fill="#FF7A858F" VerticalAlignment="Center" />
-                            <TextBlock Text="All" FontSize="11.5" FontWeight="SemiBold" Foreground="#FFF3F4F1" />
-                        </StackPanel>
-                    </Button>
-                    <Button
-                        x:Name="PinnedGroupQuickButton"
-                        Tag="quick"
-                        Height="28"
-                        Padding="8,0,8,0"
-                        CornerRadius="14"
-                        Background="#FF0F1418"
-                        BorderBrush="#FF2A343E"
-                        BorderThickness="1"
-                        Click="PinnedGroupFilterButton_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Ellipse Width="7" Height="7" Fill="#FFC4A06B" VerticalAlignment="Center" />
-                            <TextBlock Text="Quick" FontSize="11.5" FontWeight="SemiBold" Foreground="#FFF3F4F1" />
-                        </StackPanel>
-                    </Button>
-                    <Button
-                        x:Name="PinnedGroupWorkButton"
-                        Tag="work"
-                        Height="28"
-                        Padding="8,0,8,0"
-                        CornerRadius="14"
-                        Background="#FF0F1418"
-                        BorderBrush="#FF2A343E"
-                        BorderThickness="1"
-                        Click="PinnedGroupFilterButton_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Ellipse Width="7" Height="7" Fill="#FF7FB59D" VerticalAlignment="Center" />
-                            <TextBlock Text="Work" FontSize="11.5" FontWeight="SemiBold" Foreground="#FFF3F4F1" />
-                        </StackPanel>
-                    </Button>
-                    <Button
-                        x:Name="PinnedGroupIdeaButton"
-                        Tag="idea"
-                        Height="28"
-                        Padding="8,0,8,0"
-                        CornerRadius="14"
-                        Background="#FF0F1418"
-                        BorderBrush="#FF2A343E"
-                        BorderThickness="1"
-                        Click="PinnedGroupFilterButton_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Ellipse Width="7" Height="7" Fill="#FF88A9C9" VerticalAlignment="Center" />
-                            <TextBlock Text="Idea" FontSize="11.5" FontWeight="SemiBold" Foreground="#FFF3F4F1" />
-                        </StackPanel>
-                    </Button>
-                </StackPanel>
-                </StackPanel>
+                <ScrollViewer
+                    x:Name="PinnedGroupTabsScroller"
+                    Grid.Column="1"
+                    HorizontalScrollMode="Enabled"
+                    HorizontalScrollBarVisibility="Hidden"
+                    VerticalScrollMode="Disabled"
+                    VerticalScrollBarVisibility="Disabled"
+                    ZoomMode="Disabled">
+                    <StackPanel
+                        x:Name="PinnedGroupTabs"
+                        Orientation="Horizontal"
+                        Spacing="6" />
+                </ScrollViewer>
+                <Button
+                    x:Name="PinnedGroupManageButton"
+                    Grid.Column="2"
+                    Height="28"
+                    Padding="10,0,10,0"
+                    CornerRadius="14"
+                    Background="#FF0F1418"
+                    BorderBrush="#FF2A343E"
+                    BorderThickness="1"
+                    Click="PinnedGroupManageButton_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon
+                            Glyph="&#xE713;"
+                            FontFamily="Segoe MDL2 Assets"
+                            FontSize="11"
+                            Foreground="#FFB5BEC6" />
+                        <TextBlock
+                            Text="Manage"
+                            FontSize="11.5"
+                            FontWeight="SemiBold"
+                            Foreground="#FFF3F4F1" />
+                    </StackPanel>
+                </Button>
+                </Grid>
 
                 <Border
                     x:Name="SearchBarShell"
@@ -398,9 +374,19 @@
                     CornerRadius="10"
                     Padding="6">
                     <StackPanel Spacing="4">
+                        <TextBlock
+                            x:Name="CardContextMoveToGroupLabel"
+                            Margin="10,4,10,2"
+                            FontSize="11"
+                            FontWeight="SemiBold"
+                            Foreground="#FF818D99"
+                            Text="Move to Group" />
+                        <StackPanel
+                            x:Name="CardContextGroupButtonsPanel"
+                            Spacing="4" />
                         <Button
-                            x:Name="CardContextPinQuickButton"
-                            Content="Pin to Quick"
+                            x:Name="CardContextCreateGroupButton"
+                            Content="Create New Group…"
                             MinWidth="150"
                             HorizontalAlignment="Stretch"
                             HorizontalContentAlignment="Left"
@@ -410,36 +396,10 @@
                             BorderThickness="1"
                             BorderBrush="Transparent"
                             Foreground="#FFF3F4F1"
-                            Click="CardContextPinQuickButton_Click" />
-                        <Button
-                            x:Name="CardContextPinWorkButton"
-                            Content="Pin to Work"
-                            MinWidth="150"
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Left"
-                            Padding="10,6"
-                            CornerRadius="8"
-                            Background="Transparent"
-                            BorderThickness="1"
-                            BorderBrush="Transparent"
-                            Foreground="#FFF3F4F1"
-                            Click="CardContextPinWorkButton_Click" />
-                        <Button
-                            x:Name="CardContextPinIdeaButton"
-                            Content="Pin to Idea"
-                            MinWidth="150"
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Left"
-                            Padding="10,6"
-                            CornerRadius="8"
-                            Background="Transparent"
-                            BorderThickness="1"
-                            BorderBrush="Transparent"
-                            Foreground="#FFF3F4F1"
-                            Click="CardContextPinIdeaButton_Click" />
+                            Click="CardContextCreateGroupButton_Click" />
                         <Button
                             x:Name="CardContextUnpinButton"
-                            Content="Unpin"
+                            Content="Unassign from Group"
                             MinWidth="150"
                             HorizontalAlignment="Stretch"
                             HorizontalContentAlignment="Left"
@@ -493,6 +453,60 @@
                     </StackPanel>
                 </Border>
             </Popup>
+
+            <Grid
+                x:Name="TransientSurfaceLayer"
+                Background="#16000000"
+                Visibility="Collapsed"
+                PointerPressed="TransientSurfaceLayer_PointerPressed">
+                <Border
+                    x:Name="CommandPalettePanel"
+                    Width="680"
+                    MinWidth="360"
+                    MaxWidth="760"
+                    MaxHeight="520"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Visibility="Collapsed"
+                    PointerPressed="TransientSurfacePanel_PointerPressed">
+                    <ContentControl x:Name="CommandPaletteContentHost" />
+                </Border>
+
+                <Border
+                    x:Name="PinnedGroupManagerPanel"
+                    MinWidth="420"
+                    MaxWidth="760"
+                    Margin="28,60,28,28"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
+                    Visibility="Collapsed"
+                    PointerPressed="TransientSurfacePanel_PointerPressed">
+                    <ContentControl x:Name="PinnedGroupManagerContentHost" />
+                </Border>
+
+                <Border
+                    x:Name="AssignPinnedGroupPanel"
+                    MinWidth="320"
+                    MaxWidth="420"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Visibility="Collapsed"
+                    PointerPressed="TransientSurfacePanel_PointerPressed">
+                    <ContentControl x:Name="AssignPinnedGroupContentHost" />
+                </Border>
+
+                <Border
+                    x:Name="KeyboardHelpPanel"
+                    MinWidth="320"
+                    MaxWidth="460"
+                    Margin="20,0,20,28"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Bottom"
+                    Visibility="Collapsed"
+                    PointerPressed="TransientSurfacePanel_PointerPressed">
+                    <ContentControl x:Name="KeyboardHelpContentHost" />
+                </Border>
+            </Grid>
 
             <Border
                 x:Name="ToastPanel"

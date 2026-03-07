@@ -180,9 +180,10 @@ public sealed partial class MainWindow : Window
     private bool _trayIconAdded;
     private NOTIFYICONDATA _trayIconData;
     private AppWindow? _appWindow;
-    private Window? _commandPaletteWindow;
-    private AppWindow? _commandPaletteAppWindow;
     private bool _isCommandPaletteOpen;
+    private bool _isPinnedGroupManagerOpen;
+    private bool _isAssignPinnedGroupOpen;
+    private bool _isKeyboardHelpOpen;
 
     private bool _isOpen;
     private bool _isAnimating;
@@ -205,6 +206,7 @@ public sealed partial class MainWindow : Window
     private readonly List<(ClipboardEntry Entry, TextBlock Label)> _agoLabels = new();
     private readonly List<ClipboardEntry> _entries = new();
     private readonly List<ClipboardEntry> _filteredEntries = new();
+    private readonly List<PinnedGroupDefinitionModel> _pinnedGroups = new();
     private int _selectedCardIndex = -1;
     private int _previewCardIndex = -1;
     private string _searchQuery = string.Empty;
@@ -240,6 +242,8 @@ public sealed partial class MainWindow : Window
     private FrameworkElement? _cardContextPopupAnchor;
     private bool _isTrashView;
     private bool _pasteAsPlainText;
+    private ClipboardEntry? _assignPinnedGroupEntry;
+    private ClipboardEntry? _reopenAssignEntryAfterGroupManager;
     private ClipboardEntry? _pendingUndoOriginalEntry;
     private ClipboardEntry? _pendingUndoDeletedEntry;
     private int _pendingUndoIndex = -1;
@@ -372,7 +376,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        CloseCommandPaletteWindow();
+        CloseAllTransientSurfaces(restoreFocus: false);
 
         if (_isAnimating)
         {
@@ -388,21 +392,128 @@ public sealed partial class MainWindow : Window
         _overlayClosedAtUtc = DateTimeOffset.UtcNow;
     }
 
-    private void CloseCommandPaletteWindow()
+    private bool IsTransientSurfaceOpen() =>
+        _isCommandPaletteOpen ||
+        _isPinnedGroupManagerOpen ||
+        _isAssignPinnedGroupOpen ||
+        _isKeyboardHelpOpen;
+
+    private void UpdateTransientSurfaceLayerVisibility()
     {
-        try
+        TransientSurfaceLayer.Visibility = IsTransientSurfaceOpen()
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private void PrepareTransientSurfaceOpen()
+    {
+        HideCardPreview();
+        HideCardContextPopup();
+        _suppressDeactivateCloseUntilUtc = DateTimeOffset.UtcNow.AddMilliseconds(500);
+    }
+
+    private void CloseAllTransientSurfaces(bool restoreFocus)
+    {
+        CloseAssignPinnedGroupPanel(restoreFocus: false);
+        ClosePinnedGroupManagerPanel(restoreFocus: false);
+        CloseKeyboardHelpPanel(restoreFocus: false);
+        CloseCommandPaletteWindow(restoreFocus: false);
+
+        if (restoreFocus)
         {
-            _commandPaletteWindow?.Close();
+            ActivateAndFocusInput();
         }
-        catch
+    }
+
+    private void CloseCommandPaletteWindow(bool restoreFocus = true)
+    {
+        CommandPaletteContentHost.Content = null;
+        CommandPalettePanel.Visibility = Visibility.Collapsed;
+        _isCommandPaletteOpen = false;
+        UpdateTransientSurfaceLayerVisibility();
+
+        if (restoreFocus)
         {
-            // Best effort cleanup only.
+            ActivateAndFocusInput();
         }
-        finally
+    }
+
+    private void ClosePinnedGroupManagerPanel(bool restoreFocus = true)
+    {
+        if (!_isPinnedGroupManagerOpen)
         {
-            _commandPaletteWindow = null;
-            _commandPaletteAppWindow = null;
-            _isCommandPaletteOpen = false;
+            return;
+        }
+
+        PinnedGroupManagerContentHost.Content = null;
+        PinnedGroupManagerPanel.Visibility = Visibility.Collapsed;
+        _isPinnedGroupManagerOpen = false;
+        UpdateTransientSurfaceLayerVisibility();
+
+        var reopenEntry = _reopenAssignEntryAfterGroupManager;
+        _reopenAssignEntryAfterGroupManager = null;
+        if (restoreFocus && reopenEntry is not null && !reopenEntry.IsDeleted && _pinnedGroups.Count > 0)
+        {
+            DispatcherQueue.TryEnqueue(() => _ = ShowAssignPinnedGroupDialogAsync(reopenEntry));
+            return;
+        }
+
+        if (restoreFocus)
+        {
+            ActivateAndFocusInput();
+        }
+    }
+
+    private void CloseAssignPinnedGroupPanel(bool restoreFocus = true)
+    {
+        AssignPinnedGroupContentHost.Content = null;
+        AssignPinnedGroupPanel.Visibility = Visibility.Collapsed;
+        _assignPinnedGroupEntry = null;
+        _isAssignPinnedGroupOpen = false;
+        UpdateTransientSurfaceLayerVisibility();
+
+        if (restoreFocus)
+        {
+            ActivateAndFocusInput();
+        }
+    }
+
+    private void CloseKeyboardHelpPanel(bool restoreFocus = true)
+    {
+        KeyboardHelpContentHost.Content = null;
+        KeyboardHelpPanel.Visibility = Visibility.Collapsed;
+        _isKeyboardHelpOpen = false;
+        UpdateTransientSurfaceLayerVisibility();
+
+        if (restoreFocus)
+        {
+            ActivateAndFocusInput();
+        }
+    }
+
+    private void CloseTopTransientSurface()
+    {
+        if (_isCommandPaletteOpen)
+        {
+            CloseCommandPaletteWindow();
+            return;
+        }
+
+        if (_isAssignPinnedGroupOpen)
+        {
+            CloseAssignPinnedGroupPanel();
+            return;
+        }
+
+        if (_isKeyboardHelpOpen)
+        {
+            CloseKeyboardHelpPanel();
+            return;
+        }
+
+        if (_isPinnedGroupManagerOpen)
+        {
+            ClosePinnedGroupManagerPanel();
         }
     }
 
@@ -559,13 +670,13 @@ public sealed partial class MainWindow : Window
                 var isDown = keyDown;
                 var isUp = keyUp;
 
-                if (isDown && _isCommandPaletteOpen && vk == VkEscape)
+                if (isDown && IsTransientSurfaceOpen() && vk == VkEscape)
                 {
-                    DispatcherQueue.TryEnqueue(CloseCommandPaletteWindow);
+                    DispatcherQueue.TryEnqueue(CloseTopTransientSurface);
                     return (IntPtr)1;
                 }
 
-                if (isDown && _isOpen && !_isCommandPaletteOpen)
+                if (isDown && _isOpen && !IsTransientSurfaceOpen())
                 {
                     if (vk == VkReturn)
                     {
@@ -664,7 +775,7 @@ public sealed partial class MainWindow : Window
     {
         if (nCode >= 0 && (_isOpen || _isAnimating))
         {
-            if (_isCommandPaletteOpen)
+            if (IsTransientSurfaceOpen())
             {
                 return CallNextHookEx(_mouseHook, nCode, wParam, lParam);
             }
@@ -924,54 +1035,67 @@ public sealed partial class MainWindow : Window
     {
         try
         {
+            _entries.Clear();
+            _pinnedGroups.Clear();
+
             if (!File.Exists(_historyFilePath))
             {
+                _pinnedGroups.AddRange(PinnedGroupCatalog.CreateSeededGroups());
                 return;
             }
 
             var json = File.ReadAllText(_historyFilePath);
             if (string.IsNullOrWhiteSpace(json))
             {
+                _pinnedGroups.AddRange(PinnedGroupCatalog.CreateSeededGroups());
                 return;
             }
 
-            var persisted = JsonSerializer.Deserialize<List<PersistedClipboardEntry>>(json);
-            if (persisted is null || persisted.Count == 0)
+            if (json.TrimStart().StartsWith("[", StringComparison.Ordinal))
             {
-                return;
-            }
-
-            _entries.Clear();
-            foreach (var item in persisted)
-            {
-                if (item is null || string.IsNullOrWhiteSpace(item.Kind))
+                var persistedEntries = JsonSerializer.Deserialize<List<PersistedClipboardEntry>>(json);
+                if (persistedEntries is null)
                 {
-                    continue;
+                    _pinnedGroups.AddRange(PinnedGroupCatalog.CreateSeededGroups());
+                    return;
                 }
 
-                _entries.Add(new ClipboardEntry(
-                    item.Kind,
-                    item.SourceApp ?? "unknown",
-                    item.Content ?? string.Empty,
-                    item.CopiedAtUtc == default ? DateTimeOffset.UtcNow : item.CopiedAtUtc,
-                    item.SourceExePath,
-                    item.SourceIconPngBytes,
-                    FromArgb(item.SourceHeaderColorArgb, Color.FromArgb(255, 44, 44, 44)),
-                    item.ImagePngBytes,
-                    item.ImageWidth,
-                    item.ImageHeight,
-                    item.LinkUrl,
-                    item.LinkTitle,
-                    item.LinkPreviewImageBytes,
-                    item.LinkFaviconImageBytes,
-                    item.LinkHost,
-                    item.IsPinned,
-                    item.IsDeleted,
-                    item.DeletedAtUtc,
-                    item.PinnedGroupId));
+                _entries.AddRange(ConvertPersistedEntries(persistedEntries));
+                _pinnedGroups.AddRange(PinnedGroupCatalog.CreateSeededGroups());
+                var migrated = ClipboardHistoryDocumentLogic.CreateMigratedDocumentFromLegacyEntries(_entries);
+                _entries.Clear();
+                _entries.AddRange(migrated.Entries);
+                _pinnedGroups.Clear();
+                _pinnedGroups.AddRange(migrated.Groups);
+                SaveHistoryToDiskNow();
+                return;
             }
 
-            _entries.Sort((a, b) => b.CopiedAtUtc.CompareTo(a.CopiedAtUtc));
+            var persisted = JsonSerializer.Deserialize<PersistedClipboardHistoryDocumentModel>(json);
+            if (persisted is null)
+            {
+                _pinnedGroups.AddRange(PinnedGroupCatalog.CreateSeededGroups());
+                return;
+            }
+
+            var persistedGroups = persisted.Groups?
+                .Select(group => group is null || string.IsNullOrWhiteSpace(group.Id) || string.IsNullOrWhiteSpace(group.Name)
+                    ? null
+                    : new PinnedGroupDefinitionModel(
+                        group.Id,
+                        group.Name,
+                        group.ColorKey ?? string.Empty,
+                        group.SortOrder))
+                .Where(group => group is not null)
+                .Cast<PinnedGroupDefinitionModel>()
+                .ToList()
+                ?? new List<PinnedGroupDefinitionModel>();
+
+            var entries = ConvertPersistedEntries(persisted.Entries ?? []);
+            var document = ClipboardHistoryDocumentLogic.CreateDocument(persistedGroups, entries);
+            _pinnedGroups.AddRange(document.Groups);
+            _entries.AddRange(document.Entries);
+
             if (PruneEntriesByRetention() > 0)
             {
                 SaveHistoryToDiskNow();
@@ -980,7 +1104,46 @@ public sealed partial class MainWindow : Window
         catch
         {
             // Corrupt or incompatible history should not break startup.
+            _entries.Clear();
+            _pinnedGroups.Clear();
+            _pinnedGroups.AddRange(PinnedGroupCatalog.CreateSeededGroups());
         }
+    }
+
+    private List<ClipboardEntry> ConvertPersistedEntries(IEnumerable<PersistedClipboardEntry> persisted)
+    {
+        var entries = new List<ClipboardEntry>();
+        foreach (var item in persisted)
+        {
+            if (item is null || string.IsNullOrWhiteSpace(item.Kind))
+            {
+                continue;
+            }
+
+            entries.Add(new ClipboardEntry(
+                item.Kind,
+                item.SourceApp ?? "unknown",
+                item.Content ?? string.Empty,
+                item.CopiedAtUtc == default ? DateTimeOffset.UtcNow : item.CopiedAtUtc,
+                item.SourceExePath,
+                item.SourceIconPngBytes,
+                FromArgb(item.SourceHeaderColorArgb, Color.FromArgb(255, 44, 44, 44)),
+                item.ImagePngBytes,
+                item.ImageWidth,
+                item.ImageHeight,
+                item.LinkUrl,
+                item.LinkTitle,
+                item.LinkPreviewImageBytes,
+                item.LinkFaviconImageBytes,
+                item.LinkHost,
+                item.IsPinned,
+                item.IsDeleted,
+                item.DeletedAtUtc,
+                item.PinnedGroupId));
+        }
+
+        entries.Sort((a, b) => b.CopiedAtUtc.CompareTo(a.CopiedAtUtc));
+        return entries;
     }
 
     private int PruneEntriesByRetention()
@@ -1028,10 +1191,10 @@ public sealed partial class MainWindow : Window
 
             Directory.CreateDirectory(directory);
 
-            var persisted = new List<PersistedClipboardEntry>(_entries.Count);
+            var persistedEntries = new List<PersistedClipboardEntry>(_entries.Count);
             foreach (var entry in _entries)
             {
-                persisted.Add(new PersistedClipboardEntry
+                persistedEntries.Add(new PersistedClipboardEntry
                 {
                     Kind = entry.Kind,
                     SourceApp = entry.SourceApp,
@@ -1055,7 +1218,24 @@ public sealed partial class MainWindow : Window
                 });
             }
 
-            var json = JsonSerializer.Serialize(persisted);
+            var persistedGroups = _pinnedGroups
+                .OrderBy(group => group.SortOrder)
+                .Select(group => new PersistedPinnedGroupDefinitionModel
+                {
+                    Id = group.Id,
+                    Name = group.Name,
+                    ColorKey = group.ColorKey,
+                    SortOrder = group.SortOrder
+                })
+                .ToList();
+
+            var document = new PersistedClipboardHistoryDocumentModel
+            {
+                Groups = persistedGroups,
+                Entries = persistedEntries
+            };
+
+            var json = JsonSerializer.Serialize(document);
             File.WriteAllText(_historyFilePath, json);
         }
         catch
@@ -1085,24 +1265,63 @@ public sealed partial class MainWindow : Window
 
     private static string? NormalizePinnedGroupId(string? groupId) => PinnedGroupCatalog.Normalize(groupId);
 
-    private static string GetPinnedGroupLabel(string? groupId) => PinnedGroupCatalog.GetLabel(groupId);
+    private string GetPinnedGroupLabel(string? groupId) => PinnedGroupCatalog.GetLabel(_pinnedGroups, groupId);
 
-    private static Color GetPinnedGroupColor(string? groupId) => PinnedGroupCatalog.GetColor(groupId);
+    private Color GetPinnedGroupColor(string? groupId) => PinnedGroupCatalog.GetColor(_pinnedGroups, groupId);
 
     private void UpdatePinnedGroupFilterButtons()
     {
-        if (PinnedGroupAllButton is null ||
-            PinnedGroupQuickButton is null ||
-            PinnedGroupWorkButton is null ||
-            PinnedGroupIdeaButton is null)
+        if (PinnedGroupTabs is null)
         {
             return;
         }
 
-        ApplyPinnedGroupFilterButtonState(PinnedGroupAllButton, null);
-        ApplyPinnedGroupFilterButtonState(PinnedGroupQuickButton, PinnedGroupQuick);
-        ApplyPinnedGroupFilterButtonState(PinnedGroupWorkButton, PinnedGroupWork);
-        ApplyPinnedGroupFilterButtonState(PinnedGroupIdeaButton, PinnedGroupIdea);
+        PinnedGroupTabs.Children.Clear();
+        PinnedGroupTabs.Children.Add(CreatePinnedGroupFilterButton(null, "All", UiPalette.PinAll));
+
+        foreach (var group in _pinnedGroups.OrderBy(group => group.SortOrder))
+        {
+            PinnedGroupTabs.Children.Add(CreatePinnedGroupFilterButton(group.Id, group.Name, PinnedGroupCatalog.ResolveColorByKey(group.ColorKey)));
+        }
+    }
+
+    private Button CreatePinnedGroupFilterButton(string? groupId, string label, Color dotColor)
+    {
+        var button = new Button
+        {
+            Tag = groupId ?? "all",
+            Height = 28,
+            Padding = new Thickness(8, 0, 8, 0),
+            CornerRadius = new CornerRadius(14),
+            BorderThickness = new Thickness(1)
+        };
+
+        button.Content = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            Children =
+            {
+                new Ellipse
+                {
+                    Width = 7,
+                    Height = 7,
+                    Fill = UiPalette.Brush(dotColor),
+                    VerticalAlignment = VerticalAlignment.Center
+                },
+                new TextBlock
+                {
+                    Text = label,
+                    FontSize = 11.5,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = UiPalette.Brush(UiPalette.TextPrimary)
+                }
+            }
+        };
+
+        button.Click += PinnedGroupFilterButton_Click;
+        ApplyPinnedGroupFilterButtonState(button, groupId);
+        return button;
     }
 
     private void ApplyPinnedGroupFilterButtonState(Button button, string? groupId)
@@ -1119,6 +1338,516 @@ public sealed partial class MainWindow : Window
 
         button.Background = UiPalette.Brush(UiPalette.WithAlpha(UiPalette.AccentPrimary, 24));
         button.BorderBrush = UiPalette.Brush(UiPalette.WithAlpha(UiPalette.AccentPrimary, 170));
+    }
+
+    private bool TryGetPinnedGroupDefinition(string? groupId, out PinnedGroupDefinitionModel? group)
+    {
+        group = PinnedGroupCatalog.FindById(_pinnedGroups, groupId);
+        return group is not null;
+    }
+
+    private void RefreshPinnedGroupUiAndPersist()
+    {
+        if (!string.IsNullOrWhiteSpace(_activePinnedGroupId) &&
+            !TryGetPinnedGroupDefinition(_activePinnedGroupId, out _))
+        {
+            _activePinnedGroupId = null;
+        }
+
+        UpdatePinnedGroupFilterButtons();
+        RebuildCards();
+        ScheduleHistorySave();
+    }
+
+    private System.Threading.Tasks.Task ShowPinnedGroupManagerAsync(
+        string? focusGroupId = null,
+        bool focusCreate = false,
+        string? confirmDeleteGroupId = null)
+    {
+        PrepareTransientSurfaceOpen();
+        CloseCommandPaletteWindow(restoreFocus: false);
+        CloseAssignPinnedGroupPanel(restoreFocus: false);
+        CloseKeyboardHelpPanel(restoreFocus: false);
+
+        string? pendingDeleteGroupId = confirmDeleteGroupId;
+        TextBox? focusNameBox = null;
+
+        var shellBorder = new Border
+        {
+            Background = UiPalette.Brush(UiPalette.PopupSurface),
+            BorderBrush = UiPalette.Brush(UiPalette.StrokeStrong),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(18),
+            Padding = new Thickness(18, 16, 18, 18)
+        };
+
+        var root = new Grid
+        {
+            RowSpacing = 12
+        };
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        shellBorder.Child = root;
+
+        var header = new Grid();
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(new TextBlock
+        {
+            Text = "Pinned Groups",
+            FontSize = 18,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = UiPalette.Brush(UiPalette.TextPrimary)
+        });
+        var closeButton = new Button
+        {
+            Content = "Done",
+            MinWidth = 72
+        };
+        closeButton.Click += (_, _) => ClosePinnedGroupManagerPanel();
+        Grid.SetColumn(closeButton, 1);
+        header.Children.Add(closeButton);
+        root.Children.Add(header);
+
+        var intro = new TextBlock
+        {
+            Text = "Create, rename, or delete groups inside the overlay. Deleting a group keeps items and only removes the assignment.",
+            FontSize = 12.5,
+            Foreground = UiPalette.Brush(UiPalette.TextSecondary),
+            TextWrapping = TextWrapping.WrapWholeWords
+        };
+        Grid.SetRow(intro, 1);
+        root.Children.Add(intro);
+
+        var groupsPanel = new StackPanel
+        {
+            Spacing = 10
+        };
+        var groupsScroller = new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Content = groupsPanel
+        };
+        Grid.SetRow(groupsScroller, 2);
+        root.Children.Add(groupsScroller);
+
+        var statusText = new TextBlock
+        {
+            Visibility = Visibility.Collapsed,
+            Foreground = UiPalette.Brush(UiPalette.AccentWarning),
+            TextWrapping = TextWrapping.WrapWholeWords
+        };
+        Grid.SetRow(statusText, 3);
+        root.Children.Add(statusText);
+
+        var createRow = new Grid
+        {
+            ColumnSpacing = 10
+        };
+        createRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        createRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var createTextBox = new TextBox
+        {
+            PlaceholderText = "New group name",
+            MaxLength = PinnedGroupCatalog.MaxNameLength,
+            MinHeight = 40
+        };
+        createRow.Children.Add(createTextBox);
+        var createButton = new Button
+        {
+            Content = "Create",
+            MinWidth = 88,
+            MinHeight = 40
+        };
+        Grid.SetColumn(createButton, 1);
+        createRow.Children.Add(createButton);
+        Grid.SetRow(createRow, 4);
+        root.Children.Add(createRow);
+
+        void SetStatus(string message)
+        {
+            statusText.Text = message;
+            statusText.Visibility = string.IsNullOrWhiteSpace(message)
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+        }
+
+        void RenderGroups()
+        {
+            groupsPanel.Children.Clear();
+            focusNameBox = null;
+
+            foreach (var group in _pinnedGroups.OrderBy(group => group.SortOrder))
+            {
+                var isPendingDelete = string.Equals(pendingDeleteGroupId, group.Id, StringComparison.Ordinal);
+                var rowShell = new Border
+                {
+                    Background = UiPalette.Brush(UiPalette.WithAlpha(UiPalette.ElevatedSurface, 214)),
+                    BorderBrush = UiPalette.Brush(isPendingDelete ? UiPalette.AccentWarning : UiPalette.StrokeSubtle),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(12),
+                    Padding = new Thickness(12, 10, 12, 10)
+                };
+
+                var row = new Grid
+                {
+                    ColumnSpacing = 10
+                };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                rowShell.Child = row;
+
+                var dot = new Ellipse
+                {
+                    Width = 9,
+                    Height = 9,
+                    Fill = UiPalette.Brush(PinnedGroupCatalog.ResolveColorByKey(group.ColorKey)),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(2, 0, 0, 0)
+                };
+                row.Children.Add(dot);
+
+                var nameBox = new TextBox
+                {
+                    Text = group.Name,
+                    MaxLength = PinnedGroupCatalog.MaxNameLength,
+                    MinHeight = 38
+                };
+                if (focusGroupId is not null && string.Equals(group.Id, focusGroupId, StringComparison.Ordinal))
+                {
+                    focusNameBox = nameBox;
+                    focusGroupId = null;
+                }
+
+                void SaveGroup()
+                {
+                    if (!PinnedGroupCatalog.TryValidateName(nameBox.Text, _pinnedGroups, group.Id, out var normalizedName, out var error))
+                    {
+                        SetStatus(error);
+                        return;
+                    }
+
+                    var index = _pinnedGroups.FindIndex(item => string.Equals(item.Id, group.Id, StringComparison.Ordinal));
+                    if (index < 0)
+                    {
+                        return;
+                    }
+
+                    _pinnedGroups[index] = PinnedGroupCatalog.RenameGroup(_pinnedGroups[index], normalizedName);
+                    pendingDeleteGroupId = null;
+                    SetStatus(string.Empty);
+                    RefreshPinnedGroupUiAndPersist();
+                    focusGroupId = group.Id;
+                    RenderGroups();
+                }
+
+                nameBox.KeyDown += (_, args) =>
+                {
+                    if (args.Key == Windows.System.VirtualKey.Enter)
+                    {
+                        SaveGroup();
+                        args.Handled = true;
+                    }
+                };
+                Grid.SetColumn(nameBox, 1);
+                row.Children.Add(nameBox);
+
+                var saveButton = new Button
+                {
+                    Content = "Save",
+                    MinWidth = 72,
+                    MinHeight = 38
+                };
+                saveButton.Click += (_, _) => SaveGroup();
+                Grid.SetColumn(saveButton, 2);
+                row.Children.Add(saveButton);
+
+                var deleteButton = new Button
+                {
+                    Content = isPendingDelete ? "Confirm" : "Delete",
+                    MinWidth = 82,
+                    MinHeight = 38
+                };
+                deleteButton.Click += (_, _) =>
+                {
+                    if (!isPendingDelete)
+                    {
+                        pendingDeleteGroupId = group.Id;
+                        focusGroupId = group.Id;
+                        SetStatus($"Delete \"{group.Name}\"? Items stay in history and become unassigned. Click Confirm to continue.");
+                        RenderGroups();
+                        return;
+                    }
+
+                    var updated = ClipboardHistoryDocumentLogic.DeleteGroup(_pinnedGroups, _entries, group.Id);
+                    _pinnedGroups.Clear();
+                    _pinnedGroups.AddRange(updated.Groups);
+                    _entries.Clear();
+                    _entries.AddRange(updated.Entries);
+                    pendingDeleteGroupId = null;
+                    SetStatus(string.Empty);
+                    RefreshPinnedGroupUiAndPersist();
+                    ShowToast($"Deleted group {group.Name}");
+                    RenderGroups();
+                };
+                Grid.SetColumn(deleteButton, 3);
+                row.Children.Add(deleteButton);
+
+                groupsPanel.Children.Add(rowShell);
+            }
+
+            if (_pinnedGroups.Count == 0)
+            {
+                groupsPanel.Children.Add(new Border
+                {
+                    Background = UiPalette.Brush(UiPalette.WithAlpha(UiPalette.ElevatedSurface, 180)),
+                    BorderBrush = UiPalette.Brush(UiPalette.StrokeSubtle),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(12),
+                    Padding = new Thickness(14, 12, 14, 12),
+                    Child = new TextBlock
+                    {
+                        Text = "No groups yet. Create one below to pin items into reusable buckets.",
+                        TextWrapping = TextWrapping.WrapWholeWords,
+                        Foreground = UiPalette.Brush(UiPalette.TextSecondary)
+                    }
+                });
+            }
+        }
+
+        void CreateGroup()
+        {
+            if (!PinnedGroupCatalog.TryValidateName(createTextBox.Text, _pinnedGroups, null, out var normalizedName, out var error))
+            {
+                SetStatus(error);
+                return;
+            }
+
+            _pinnedGroups.Add(PinnedGroupCatalog.CreateGroup(normalizedName, _pinnedGroups));
+            createTextBox.Text = string.Empty;
+            pendingDeleteGroupId = null;
+            focusCreate = true;
+            SetStatus(string.Empty);
+            RefreshPinnedGroupUiAndPersist();
+            RenderGroups();
+            DispatcherQueue.TryEnqueue(() => _ = createTextBox.Focus(FocusState.Programmatic));
+        }
+
+        createButton.Click += (_, _) => CreateGroup();
+        createTextBox.KeyDown += (_, args) =>
+        {
+            if (args.Key == Windows.System.VirtualKey.Enter)
+            {
+                CreateGroup();
+                args.Handled = true;
+            }
+            else if (args.Key == Windows.System.VirtualKey.Escape)
+            {
+                ClosePinnedGroupManagerPanel();
+                args.Handled = true;
+            }
+        };
+
+        if (!string.IsNullOrWhiteSpace(confirmDeleteGroupId) &&
+            _pinnedGroups.Any(group => string.Equals(group.Id, confirmDeleteGroupId, StringComparison.Ordinal)))
+        {
+            var group = _pinnedGroups.First(group => string.Equals(group.Id, confirmDeleteGroupId, StringComparison.Ordinal));
+            SetStatus($"Delete \"{group.Name}\"? Items stay in history and become unassigned. Click Confirm to continue.");
+        }
+
+        RenderGroups();
+
+        PinnedGroupManagerContentHost.Content = shellBorder;
+        PinnedGroupManagerPanel.Visibility = Visibility.Visible;
+        _isPinnedGroupManagerOpen = true;
+        UpdateTransientSurfaceLayerVisibility();
+
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (focusCreate)
+            {
+                _ = createTextBox.Focus(FocusState.Programmatic);
+                return;
+            }
+
+            if (focusNameBox is not null)
+            {
+                _ = focusNameBox.Focus(FocusState.Programmatic);
+                focusNameBox.SelectAll();
+                return;
+            }
+
+            _ = closeButton.Focus(FocusState.Programmatic);
+        });
+
+        return System.Threading.Tasks.Task.CompletedTask;
+    }
+
+    private System.Threading.Tasks.Task ShowAssignPinnedGroupDialogAsync(ClipboardEntry entry)
+    {
+        if (entry.IsDeleted)
+        {
+            return System.Threading.Tasks.Task.CompletedTask;
+        }
+
+        if (_pinnedGroups.Count == 0)
+        {
+            _reopenAssignEntryAfterGroupManager = entry;
+            return ShowPinnedGroupManagerAsync(focusCreate: true);
+        }
+
+        PrepareTransientSurfaceOpen();
+        CloseCommandPaletteWindow(restoreFocus: false);
+        CloseKeyboardHelpPanel(restoreFocus: false);
+        ClosePinnedGroupManagerPanel(restoreFocus: false);
+
+        _assignPinnedGroupEntry = entry;
+
+        var shellBorder = new Border
+        {
+            Background = UiPalette.Brush(UiPalette.PopupSurface),
+            BorderBrush = UiPalette.Brush(UiPalette.StrokeStrong),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(16, 14, 16, 14)
+        };
+
+        var root = new Grid
+        {
+            RowSpacing = 10
+        };
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        shellBorder.Child = root;
+
+        var header = new Grid();
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(new TextBlock
+        {
+            Text = "Assign to Group",
+            FontSize = 16,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = UiPalette.Brush(UiPalette.TextPrimary)
+        });
+        var closeButton = new Button
+        {
+            Content = "Close",
+            MinWidth = 72
+        };
+        closeButton.Click += (_, _) => CloseAssignPinnedGroupPanel();
+        Grid.SetColumn(closeButton, 1);
+        header.Children.Add(closeButton);
+        root.Children.Add(header);
+
+        var panel = new StackPanel
+        {
+            Spacing = 8
+        };
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Choose where to place the selected item.",
+            Foreground = UiPalette.Brush(UiPalette.TextSecondary),
+            TextWrapping = TextWrapping.WrapWholeWords
+        });
+
+        var combo = new ComboBox
+        {
+            MinWidth = 260,
+            MinHeight = 40,
+            ItemsSource = _pinnedGroups.OrderBy(group => group.SortOrder).ToList(),
+            DisplayMemberPath = nameof(PinnedGroupDefinitionModel.Name),
+            SelectedItem = _pinnedGroups.FirstOrDefault(group => string.Equals(group.Id, entry.PinnedGroupId, StringComparison.Ordinal)) ??
+                _pinnedGroups.OrderBy(group => group.SortOrder).FirstOrDefault()
+        };
+        panel.Children.Add(combo);
+        Grid.SetRow(panel, 1);
+        root.Children.Add(panel);
+
+        var actions = new Grid
+        {
+            ColumnSpacing = 8
+        };
+        actions.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        actions.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        actions.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        actions.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var manageButton = new Button
+        {
+            Content = "Manage Groups…",
+            MinWidth = 132,
+            MinHeight = 38
+        };
+        manageButton.Click += async (_, _) =>
+        {
+            _reopenAssignEntryAfterGroupManager = entry;
+            CloseAssignPinnedGroupPanel(restoreFocus: false);
+            await ShowPinnedGroupManagerAsync(focusCreate: true);
+        };
+        actions.Children.Add(manageButton);
+
+        void ApplyAssignment()
+        {
+            if (combo.SelectedItem is not PinnedGroupDefinitionModel selectedGroup)
+            {
+                return;
+            }
+
+            CloseAssignPinnedGroupPanel(restoreFocus: false);
+            SetEntryPinnedGroup(entry, selectedGroup.Id);
+        }
+
+        var applyButton = new Button
+        {
+            Content = "Apply",
+            MinWidth = 88,
+            MinHeight = 38
+        };
+        applyButton.Click += (_, _) => ApplyAssignment();
+        Grid.SetColumn(applyButton, 2);
+        actions.Children.Add(applyButton);
+
+        var cancelButton = new Button
+        {
+            Content = "Cancel",
+            MinWidth = 88,
+            MinHeight = 38
+        };
+        cancelButton.Click += (_, _) => CloseAssignPinnedGroupPanel();
+        Grid.SetColumn(cancelButton, 3);
+        actions.Children.Add(cancelButton);
+        Grid.SetRow(actions, 2);
+        root.Children.Add(actions);
+
+        combo.KeyDown += (_, args) =>
+        {
+            if (args.Key == Windows.System.VirtualKey.Enter)
+            {
+                ApplyAssignment();
+                args.Handled = true;
+            }
+            else if (args.Key == Windows.System.VirtualKey.Escape)
+            {
+                CloseAssignPinnedGroupPanel();
+                args.Handled = true;
+            }
+        };
+
+        AssignPinnedGroupContentHost.Content = shellBorder;
+        AssignPinnedGroupPanel.Visibility = Visibility.Visible;
+        _isAssignPinnedGroupOpen = true;
+        UpdateTransientSurfaceLayerVisibility();
+
+        DispatcherQueue.TryEnqueue(() => _ = combo.Focus(FocusState.Programmatic));
+        return System.Threading.Tasks.Task.CompletedTask;
     }
 
     private async System.Threading.Tasks.Task<ClipboardEntry?> BuildEntryFromClipboardAsync(
@@ -1779,6 +2508,17 @@ public sealed partial class MainWindow : Window
             }
 
             var vk = wParam.ToInt32();
+            if (IsTransientSurfaceOpen())
+            {
+                if (vk == VkEscape)
+                {
+                    DispatcherQueue.TryEnqueue(CloseTopTransientSurface);
+                    return IntPtr.Zero;
+                }
+
+                return CallWindowProc(_oldWndProc, hwnd, msg, wParam, lParam);
+            }
+
             if (vk == VkReturn)
             {
                 DispatcherQueue.TryEnqueue(() => OnConfirmSelectionRequested(IsAltPressed()));
@@ -1835,7 +2575,7 @@ public sealed partial class MainWindow : Window
 
     private void OnClosed(object sender, WindowEventArgs args)
     {
-        CloseCommandPaletteWindow();
+        CloseAllTransientSurfaces(restoreFocus: false);
 
         RemoveTrayIcon();
 
@@ -1880,11 +2620,6 @@ public sealed partial class MainWindow : Window
     {
         if (args.WindowActivationState == WindowActivationState.Deactivated)
         {
-            if (_isCommandPaletteOpen)
-            {
-                return;
-            }
-
             if (DateTimeOffset.UtcNow < _suppressDeactivateCloseUntilUtc)
             {
                 return;
@@ -1917,13 +2652,46 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        if (IsTransientSurfaceOpen())
+        {
+            return;
+        }
+
         HideCardContextPopup();
         ActivateAndFocusInput();
         e.Handled = true;
     }
 
+    private void TransientSurfaceLayer_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        var point = e.GetCurrentPoint(TransientSurfaceLayer);
+        if (!point.Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        CloseTopTransientSurface();
+        e.Handled = true;
+    }
+
+    private void TransientSurfacePanel_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        e.Handled = true;
+    }
+
     private void Root_KeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (IsTransientSurfaceOpen())
+        {
+            if (e.Key == Windows.System.VirtualKey.Escape)
+            {
+                CloseTopTransientSurface();
+                e.Handled = true;
+            }
+
+            return;
+        }
+
         if (e.Key == Windows.System.VirtualKey.Space)
         {
             if (IsSearchInputActive())
@@ -2079,43 +2847,56 @@ public sealed partial class MainWindow : Window
         _cardContextPopupAnchor = anchor;
         _suppressDeactivateCloseUntilUtc = DateTimeOffset.UtcNow.AddMilliseconds(500);
         var pinVisibility = _isTrashView ? Visibility.Collapsed : Visibility.Visible;
-        CardContextPinQuickButton.Visibility = pinVisibility;
-        CardContextPinWorkButton.Visibility = pinVisibility;
-        CardContextPinIdeaButton.Visibility = pinVisibility;
+        CardContextMoveToGroupLabel.Visibility = pinVisibility;
+        CardContextGroupButtonsPanel.Visibility = pinVisibility;
+        CardContextCreateGroupButton.Visibility = pinVisibility;
         CardContextUnpinButton.Visibility = pinVisibility;
         CardContextPasteModeButton.Visibility = _isTrashView ? Visibility.Collapsed : Visibility.Visible;
         CardContextRestoreButton.Visibility = _isTrashView ? Visibility.Visible : Visibility.Collapsed;
         CardContextDeleteButton.Content = _isTrashView ? "Delete Permanently" : "Move to Trash";
         CardContextPasteModeButton.Content = _pasteAsPlainText ? "Paste Mode: Plain text" : "Paste Mode: As-is";
         CardContextUnpinButton.IsEnabled = !string.IsNullOrWhiteSpace(entry.PinnedGroupId);
+        CardContextUnpinButton.Visibility = pinVisibility == Visibility.Visible && !string.IsNullOrWhiteSpace(entry.PinnedGroupId)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
 
         var transparent = UiPalette.Brush(Colors.Transparent);
-        CardContextPinQuickButton.Background = transparent;
-        CardContextPinWorkButton.Background = transparent;
-        CardContextPinIdeaButton.Background = transparent;
-        CardContextPinQuickButton.BorderBrush = transparent;
-        CardContextPinWorkButton.BorderBrush = transparent;
-        CardContextPinIdeaButton.BorderBrush = transparent;
+        CardContextGroupButtonsPanel.Children.Clear();
         CardContextRestoreButton.Foreground = UiPalette.Brush(UiPalette.AccentPrimary);
         CardContextDeleteButton.Foreground = UiPalette.Brush(_isTrashView ? UiPalette.AccentDanger : UiPalette.AccentWarning);
         CardContextPasteModeButton.Foreground = UiPalette.Brush(UiPalette.TextPrimary);
         CardContextUnpinButton.Foreground = UiPalette.Brush(UiPalette.TextPrimary);
-        CardContextPinQuickButton.Foreground = UiPalette.Brush(UiPalette.TextPrimary);
-        CardContextPinWorkButton.Foreground = UiPalette.Brush(UiPalette.TextPrimary);
-        CardContextPinIdeaButton.Foreground = UiPalette.Brush(UiPalette.TextPrimary);
+        CardContextCreateGroupButton.Foreground = UiPalette.Brush(UiPalette.TextPrimary);
+        CardContextCreateGroupButton.Background = transparent;
+        CardContextCreateGroupButton.BorderBrush = transparent;
 
-        var selectedGroup = NormalizePinnedGroupId(entry.PinnedGroupId);
-        var selectedButton = selectedGroup switch
+        if (pinVisibility == Visibility.Visible)
         {
-            PinnedGroupQuick => CardContextPinQuickButton,
-            PinnedGroupWork => CardContextPinWorkButton,
-            PinnedGroupIdea => CardContextPinIdeaButton,
-            _ => null
-        };
-        if (selectedButton is not null)
-        {
-            selectedButton.Background = UiPalette.Brush(UiPalette.WithAlpha(UiPalette.AccentPrimary, 26));
-            selectedButton.BorderBrush = UiPalette.Brush(UiPalette.WithAlpha(UiPalette.AccentPrimary, 168));
+            foreach (var group in _pinnedGroups.OrderBy(group => group.SortOrder))
+            {
+                var button = new Button
+                {
+                    Content = $"Move to {group.Name}",
+                    Tag = group.Id,
+                    MinWidth = 150,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Left,
+                    Padding = new Thickness(10, 6, 10, 6),
+                    CornerRadius = new CornerRadius(8),
+                    Background = transparent,
+                    BorderThickness = new Thickness(1),
+                    BorderBrush = transparent,
+                    Foreground = UiPalette.Brush(UiPalette.TextPrimary)
+                };
+                button.Click += CardContextAssignGroupButton_Click;
+                if (string.Equals(group.Id, entry.PinnedGroupId, StringComparison.Ordinal))
+                {
+                    button.Background = UiPalette.Brush(UiPalette.WithAlpha(UiPalette.AccentPrimary, 26));
+                    button.BorderBrush = UiPalette.Brush(UiPalette.WithAlpha(UiPalette.AccentPrimary, 168));
+                }
+
+                CardContextGroupButtonsPanel.Children.Add(button);
+            }
         }
 
         CardContextPopup.IsOpen = false;
@@ -2181,25 +2962,16 @@ public sealed partial class MainWindow : Window
         DeleteEntry(target);
     }
 
-    private void CardContextPinQuickButton_Click(object sender, RoutedEventArgs e)
+    private void CardContextAssignGroupButton_Click(object sender, RoutedEventArgs e)
     {
-        var target = _cardContextMenuEntry;
-        HideCardContextPopup();
-        SetEntryPinnedGroup(target, PinnedGroupQuick);
-    }
+        if (sender is not FrameworkElement element)
+        {
+            return;
+        }
 
-    private void CardContextPinWorkButton_Click(object sender, RoutedEventArgs e)
-    {
         var target = _cardContextMenuEntry;
         HideCardContextPopup();
-        SetEntryPinnedGroup(target, PinnedGroupWork);
-    }
-
-    private void CardContextPinIdeaButton_Click(object sender, RoutedEventArgs e)
-    {
-        var target = _cardContextMenuEntry;
-        HideCardContextPopup();
-        SetEntryPinnedGroup(target, PinnedGroupIdea);
+        SetEntryPinnedGroup(target, NormalizePinnedGroupId(element.Tag as string));
     }
 
     private void CardContextUnpinButton_Click(object sender, RoutedEventArgs e)
@@ -2207,6 +2979,18 @@ public sealed partial class MainWindow : Window
         var target = _cardContextMenuEntry;
         HideCardContextPopup();
         SetEntryPinnedGroup(target, null);
+    }
+
+    private async void CardContextCreateGroupButton_Click(object sender, RoutedEventArgs e)
+    {
+        var target = _cardContextMenuEntry;
+        HideCardContextPopup();
+        if (target is not null)
+        {
+            _reopenAssignEntryAfterGroupManager = target;
+        }
+
+        await ShowPinnedGroupManagerAsync(focusCreate: true);
     }
 
     private void CardContextPasteModeButton_Click(object sender, RoutedEventArgs e)
@@ -2248,6 +3032,12 @@ public sealed partial class MainWindow : Window
         }
 
         var normalized = NormalizePinnedGroupId(groupId);
+        if (!string.IsNullOrWhiteSpace(normalized) && !TryGetPinnedGroupDefinition(normalized, out _))
+        {
+            ShowToast("Pinned group not found");
+            return;
+        }
+
         var next = CloneEntry(target, pinnedGroupId: normalized, overwritePinnedGroup: true);
         _entries[index] = next;
         RebuildCards();
@@ -2428,6 +3218,7 @@ public sealed partial class MainWindow : Window
             _isAnimating = false;
         }
 
+        CloseAllTransientSurfaces(restoreFocus: false);
         HideCardPreview();
         HideCardContextPopup();
         CollapseSearchBar(clearQuery: true, restoreFocus: false);
@@ -3482,6 +4273,11 @@ public sealed partial class MainWindow : Window
         CollapseSearchBar(clearQuery: true);
     }
 
+    private async void PinnedGroupManageButton_Click(object sender, RoutedEventArgs e)
+    {
+        await ShowPinnedGroupManagerAsync();
+    }
+
     private void PinnedGroupFilterButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not FrameworkElement element)
@@ -3940,14 +4736,17 @@ public sealed partial class MainWindow : Window
     {
         if (_isCommandPaletteOpen)
         {
-            _commandPaletteWindow?.Activate();
             return;
         }
+
+        PrepareTransientSurfaceOpen();
+        ClosePinnedGroupManagerPanel(restoreFocus: false);
+        CloseAssignPinnedGroupPanel(restoreFocus: false);
+        CloseKeyboardHelpPanel(restoreFocus: false);
 
         _isCommandPaletteOpen = true;
         var commands = BuildCommandPaletteActions();
         var resultRows = new List<ListViewItem>();
-        _suppressDeactivateCloseUntilUtc = DateTimeOffset.UtcNow.AddMilliseconds(500);
 
         var shellBorder = new Border
         {
@@ -4031,51 +4830,9 @@ public sealed partial class MainWindow : Window
         Grid.SetRow(helpText, 3);
         rootPanel.Children.Add(helpText);
 
-        var paletteWindow = new Window
-        {
-            Content = shellBorder
-        };
-        _commandPaletteWindow = paletteWindow;
-        paletteWindow.Closed += (_, _) =>
-        {
-            _commandPaletteWindow = null;
-            _commandPaletteAppWindow = null;
-            _isCommandPaletteOpen = false;
-        };
-        paletteWindow.Activate();
-
-        var paletteHwnd = WindowNative.GetWindowHandle(paletteWindow);
-        if (paletteHwnd != IntPtr.Zero)
-        {
-            var paletteWindowId = Win32Interop.GetWindowIdFromWindow(paletteHwnd);
-            _commandPaletteAppWindow = AppWindow.GetFromWindowId(paletteWindowId);
-            if (_commandPaletteAppWindow?.Presenter is OverlappedPresenter presenter)
-            {
-                presenter.SetBorderAndTitleBar(false, false);
-                presenter.IsResizable = false;
-                presenter.IsMaximizable = false;
-                presenter.IsMinimizable = false;
-                presenter.IsAlwaysOnTop = true;
-            }
-
-            var monitorInfo = GetCursorMonitorInfo();
-            var work = monitorInfo.rcWork;
-            var workWidth = work.Right - work.Left;
-            var workHeight = work.Bottom - work.Top;
-            var maxWidth = Math.Max(360, workWidth - (HorizontalMargin * 2));
-            var targetWidth = (int)Math.Round(workWidth * 0.52);
-            var paletteWidth = maxWidth < 680
-                ? maxWidth
-                : Math.Clamp(targetWidth, 680, maxWidth);
-
-            var maxHeight = Math.Max(300, workHeight - (VerticalMargin * 2));
-            var targetHeight = (int)Math.Round(workHeight * 0.62);
-            var paletteHeight = Math.Clamp(targetHeight, 420, maxHeight);
-
-            var paletteX = work.Left + ((workWidth - paletteWidth) / 2);
-            var paletteY = Math.Max(work.Top + VerticalMargin, work.Bottom - paletteHeight - 24);
-            _commandPaletteAppWindow?.MoveAndResize(new RectInt32(paletteX, paletteY, paletteWidth, paletteHeight));
-        }
+        CommandPaletteContentHost.Content = shellBorder;
+        CommandPalettePanel.Visibility = Visibility.Visible;
+        UpdateTransientSurfaceLayerVisibility();
 
         List<CommandPaletteActionItem> MatchActions(string query)
         {
@@ -4293,7 +5050,7 @@ public sealed partial class MainWindow : Window
                 if (listView.SelectedItem is ListViewItem selected &&
                     selected.Tag is CommandPaletteActionItem action)
                 {
-                    CloseCommandPaletteWindow();
+                    CloseCommandPaletteWindow(restoreFocus: false);
                     _ = action.ExecuteAsync();
                     args.Handled = true;
                 }
@@ -4305,7 +5062,7 @@ public sealed partial class MainWindow : Window
             if (args.ClickedItem is ListViewItem item &&
                 item.Tag is CommandPaletteActionItem action)
             {
-                CloseCommandPaletteWindow();
+                CloseCommandPaletteWindow(restoreFocus: false);
                 await action.ExecuteAsync();
             }
         };
@@ -4322,16 +5079,91 @@ public sealed partial class MainWindow : Window
                 listView.SelectedItem is ListViewItem selected &&
                 selected.Tag is CommandPaletteActionItem action)
             {
-                CloseCommandPaletteWindow();
+                CloseCommandPaletteWindow(restoreFocus: false);
                 _ = action.ExecuteAsync();
                 args.Handled = true;
             }
         };
 
         RenderList(string.Empty);
-        _ = queryBox.Focus(FocusState.Programmatic);
-        queryBox.SelectAll();
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            _ = queryBox.Focus(FocusState.Programmatic);
+            queryBox.SelectAll();
+        });
         await System.Threading.Tasks.Task.CompletedTask;
+    }
+
+    private void ShowKeyboardHelpPanel()
+    {
+        PrepareTransientSurfaceOpen();
+        CloseCommandPaletteWindow(restoreFocus: false);
+        CloseAssignPinnedGroupPanel(restoreFocus: false);
+        ClosePinnedGroupManagerPanel(restoreFocus: false);
+
+        var shellBorder = new Border
+        {
+            Background = UiPalette.Brush(UiPalette.PopupSurface),
+            BorderBrush = UiPalette.Brush(UiPalette.StrokeStrong),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(16, 14, 16, 14)
+        };
+
+        var root = new Grid
+        {
+            RowSpacing = 10
+        };
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        shellBorder.Child = root;
+
+        var header = new Grid();
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(new TextBlock
+        {
+            Text = "Keyboard Shortcuts",
+            FontSize = 16,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = UiPalette.Brush(UiPalette.TextPrimary)
+        });
+        var closeButton = new Button
+        {
+            Content = "Close",
+            MinWidth = 72
+        };
+        closeButton.Click += (_, _) => CloseKeyboardHelpPanel();
+        Grid.SetColumn(closeButton, 1);
+        header.Children.Add(closeButton);
+        root.Children.Add(header);
+
+        var intro = new TextBlock
+        {
+            Text = "Main shortcuts and quick modes for the overlay.",
+            Foreground = UiPalette.Brush(UiPalette.TextSecondary),
+            TextWrapping = TextWrapping.WrapWholeWords
+        };
+        Grid.SetRow(intro, 1);
+        root.Children.Add(intro);
+
+        var shortcuts = new TextBlock
+        {
+            Text = "Ctrl+Alt+V: Toggle overlay\nCtrl+F: Search\nCtrl+T: Trash view\nCtrl+K: Command palette\nCtrl+Shift+V: Toggle paste mode\nAlt+Enter: Plain paste (one-time)\nCtrl+Z: Undo delete\nEnter: Paste selected\nEsc: Close / Back",
+            TextWrapping = TextWrapping.WrapWholeWords,
+            Foreground = UiPalette.Brush(UiPalette.TextPrimary),
+            LineHeight = 22
+        };
+        Grid.SetRow(shortcuts, 2);
+        root.Children.Add(shortcuts);
+
+        KeyboardHelpContentHost.Content = shellBorder;
+        KeyboardHelpPanel.Visibility = Visibility.Visible;
+        _isKeyboardHelpOpen = true;
+        UpdateTransientSurfaceLayerVisibility();
+
+        DispatcherQueue.TryEnqueue(() => _ = closeButton.Focus(FocusState.Programmatic));
     }
 
     private List<CommandPaletteActionItem> BuildCommandPaletteActions()
@@ -4392,107 +5224,72 @@ public sealed partial class MainWindow : Window
                     return System.Threading.Tasks.Task.CompletedTask;
                 }),
             new(
-                "Pin Selected to Quick",
-                "Assign selected entry to Quick group",
+                "Assign Selected to Group…",
+                "Choose a pinned group for the selected item",
                 "Context Menu",
                 "Edit",
-                () =>
+                async () =>
                 {
                     var selected = GetSelectedFilteredEntry();
                     if (selected is null || selected.IsDeleted)
                     {
-                        return System.Threading.Tasks.Task.CompletedTask;
+                        return;
                     }
 
-                    var index = _entries.IndexOf(selected);
-                    if (index < 0)
-                    {
-                        return System.Threading.Tasks.Task.CompletedTask;
-                    }
-
-                    var next = CloneEntry(selected, pinnedGroupId: PinnedGroupQuick, overwritePinnedGroup: true);
-                    _entries[index] = next;
-                    RebuildCards();
-                    ScheduleHistorySave();
-                    ShowToast("Pinned to Quick");
-                    return System.Threading.Tasks.Task.CompletedTask;
+                    await ShowAssignPinnedGroupDialogAsync(selected);
                 }),
             new(
-                "Pin Selected to Work",
-                "Assign selected entry to Work group",
-                "Context Menu",
+                "Create Pinned Group",
+                "Add a new pinned group",
+                "Manage",
                 "Edit",
-                () =>
+                async () => await ShowPinnedGroupManagerAsync(focusCreate: true)),
+            new(
+                "Rename Active Group",
+                "Rename the currently selected pinned group",
+                "Manage",
+                "Edit",
+                async () =>
                 {
-                    var selected = GetSelectedFilteredEntry();
-                    if (selected is null || selected.IsDeleted)
+                    if (string.IsNullOrWhiteSpace(_activePinnedGroupId))
                     {
-                        return System.Threading.Tasks.Task.CompletedTask;
+                        ShowToast("Select a group first");
+                        return;
                     }
 
-                    var index = _entries.IndexOf(selected);
-                    if (index < 0)
-                    {
-                        return System.Threading.Tasks.Task.CompletedTask;
-                    }
-
-                    var next = CloneEntry(selected, pinnedGroupId: PinnedGroupWork, overwritePinnedGroup: true);
-                    _entries[index] = next;
-                    RebuildCards();
-                    ScheduleHistorySave();
-                    ShowToast("Pinned to Work");
-                    return System.Threading.Tasks.Task.CompletedTask;
+                    await ShowPinnedGroupManagerAsync(_activePinnedGroupId);
                 }),
             new(
-                "Pin Selected to Idea",
-                "Assign selected entry to Idea group",
-                "Context Menu",
+                "Delete Active Group",
+                "Delete the currently selected pinned group",
+                "Manage",
                 "Edit",
-                () =>
+                async () =>
                 {
-                    var selected = GetSelectedFilteredEntry();
-                    if (selected is null || selected.IsDeleted)
+                    if (string.IsNullOrWhiteSpace(_activePinnedGroupId) ||
+                        !TryGetPinnedGroupDefinition(_activePinnedGroupId, out var group) ||
+                        group is null)
                     {
-                        return System.Threading.Tasks.Task.CompletedTask;
+                        ShowToast("Select a group first");
+                        return;
                     }
 
-                    var index = _entries.IndexOf(selected);
-                    if (index < 0)
-                    {
-                        return System.Threading.Tasks.Task.CompletedTask;
-                    }
-
-                    var next = CloneEntry(selected, pinnedGroupId: PinnedGroupIdea, overwritePinnedGroup: true);
-                    _entries[index] = next;
-                    RebuildCards();
-                    ScheduleHistorySave();
-                    ShowToast("Pinned to Idea");
-                    return System.Threading.Tasks.Task.CompletedTask;
+                    await ShowPinnedGroupManagerAsync(group.Id, confirmDeleteGroupId: group.Id);
                 }),
             new(
-                "Unpin Selected",
-                "Remove selected entry from pinned groups",
+                "Unassign Selected from Group",
+                "Remove the selected item from its pinned group",
                 "Context Menu",
                 "Edit",
                 () =>
                 {
                     var selected = GetSelectedFilteredEntry();
-                    if (selected is null || selected.IsDeleted)
+                    if (selected is null || selected.IsDeleted || string.IsNullOrWhiteSpace(selected.PinnedGroupId))
                     {
                         return System.Threading.Tasks.Task.CompletedTask;
                     }
 
-                    var index = _entries.IndexOf(selected);
-                    if (index < 0)
-                    {
-                        return System.Threading.Tasks.Task.CompletedTask;
-                    }
-
-                    var next = CloneEntry(selected, pinnedGroupId: null, overwritePinnedGroup: true);
-                    _entries[index] = next;
-                    RebuildCards();
-                    ScheduleHistorySave();
-                    ShowToast("Unpinned");
+                    SetEntryPinnedGroup(selected, null);
                     return System.Threading.Tasks.Task.CompletedTask;
                 }),
             new(
@@ -4536,20 +5333,10 @@ public sealed partial class MainWindow : Window
                 "Show main shortcuts and modes",
                 "Ctrl+K",
                 "Help",
-                async () =>
+                () =>
                 {
-                    var help = new ContentDialog
-                    {
-                        Title = "Keyboard Shortcuts",
-                        Content = new TextBlock
-                        {
-                            Text = "Ctrl+Alt+V: Toggle overlay\nCtrl+F: Search\nCtrl+T: Trash view\nAlt+Enter: Plain paste (one-time)\nCtrl+Shift+V: Toggle paste mode\nCtrl+Z: Undo delete\nEnter: Paste selected\nEsc: Close/Back",
-                            TextWrapping = TextWrapping.WrapWholeWords
-                        },
-                        CloseButtonText = "Close",
-                        XamlRoot = Root.XamlRoot
-                    };
-                    await help.ShowAsync();
+                    ShowKeyboardHelpPanel();
+                    return System.Threading.Tasks.Task.CompletedTask;
                 })
         };
     }
