@@ -9,11 +9,11 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$projectPath = Join-Path $repoRoot "PasteWinUI\PasteWinUI.csproj"
-$publishDir = Join-Path $repoRoot "PasteWinUI\bin\x64\$Configuration\net8.0-windows10.0.19041.0\$Runtime\publish"
+$projectPath = Join-Path $repoRoot "src\PasteWinUI\PasteWinUI.csproj"
+$publishDir = Join-Path $repoRoot "src\PasteWinUI\bin\x64\$Configuration\net8.0-windows10.0.19041.0\$Runtime\publish"
 $publishExe = Join-Path $publishDir "PasteWinUI.exe"
-$workDir = Join-Path $repoRoot "installer\iexpress-work"
-$outputDir = Join-Path $repoRoot "installer\output"
+$workDir = Join-Path $repoRoot "deploy\installer\iexpress-work"
+$outputDir = Join-Path $repoRoot "deploy\installer\output"
 $targetExe = Join-Path $outputDir "PasteWinUI-Setup-$Version-offline.exe"
 $sedPath = Join-Path $workDir "package.sed"
 $payloadZip = Join-Path $workDir "payload.zip"

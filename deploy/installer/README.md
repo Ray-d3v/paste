@@ -8,30 +8,30 @@
 Run from repository root:
 
 ```powershell
-.\scripts\build-installer.ps1 -Version 0.1.0
+.\tools\scripts\build-installer.ps1 -Version 0.1.0
 ```
 
 This script does the following:
-- `dotnet publish` for `PasteWinUI` (`win-x64`, self-contained)
-- compiles `installer/PasteWinUI.iss`
-- outputs installer to `installer/output/`
+- `dotnet publish` for `src/PasteWinUI` (`win-x64`, self-contained)
+- compiles `deploy/installer/PasteWinUI.iss`
+- outputs installer to `deploy/installer/output/`
 
 ## Useful Options
 - Skip publish and only rebuild installer:
 
 ```powershell
-.\scripts\build-installer.ps1 -Version 0.1.0 -SkipPublish
+.\tools\scripts\build-installer.ps1 -Version 0.1.0 -SkipPublish
 ```
 
 ## Offline Alternative (No Inno Setup)
 If Inno Setup is not installed, use Windows built-in IExpress:
 
 ```powershell
-.\scripts\build-offline-installer.ps1 -Version 0.1.0
+.\tools\scripts\build-offline-installer.ps1 -Version 0.1.0
 ```
 
 Output:
-- `installer/output/PasteWinUI-Setup-<version>-offline.exe`
+- `deploy/installer/output/PasteWinUI-Setup-<version>-offline.exe`
 
 ## Notes
 - Installer is per-user (`%LocalAppData%\Programs\PasteWinUI`) and does not require admin rights.

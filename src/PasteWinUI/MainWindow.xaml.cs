@@ -16,6 +16,7 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Runtime.InteropServices;
+using System.Linq;
 using System.Threading;
 using WinRT.Interop;
 using Windows.ApplicationModel.DataTransfer;
@@ -39,6 +40,9 @@ public sealed partial class MainWindow : Window
     private const int VkRight = 0x27;
     private const int VkSpace = 0x20;
     private const int VkEscape = 0x1B;
+    private const int VkT = 0x54;
+    private const int VkK = 0x4B;
+    private const int VkZ = 0x5A;
     private const int WmHotkey = 0x0312;
     private const int WmApp = 0x8000;
     private const int WmTrayIcon = WmApp + 1;
@@ -55,8 +59,10 @@ public sealed partial class MainWindow : Window
     private const int WmLbuttondown = 0x0201;
     private const int WmLbuttonup = 0x0202;
     private const int WmRbuttondown = 0x0204;
+    private const int WmRbuttonup = 0x0205;
     private const int WmMbuttondown = 0x0207;
     private const int WmXbuttondown = 0x020B;
+    private const int WmContextmenu = 0x007B;
     private const int WmGetIcon = 0x007F;
     private const int IconSmall = 0;
     private const int IconBig = 1;
@@ -70,6 +76,9 @@ public sealed partial class MainWindow : Window
     private const int VkRcontrol = 0xA3;
     private const int VkLmenu = 0xA4;
     private const int VkRmenu = 0xA5;
+    private const int VkShiftKey = 0x10;
+    private const int VkLshift = 0xA0;
+    private const int VkRshift = 0xA1;
     private const int GwlExstyle = -20;
     private const uint GaRoot = 2;
     private const long WsExAppwindow = 0x00040000L;
@@ -89,6 +98,13 @@ public sealed partial class MainWindow : Window
     private const uint NifTip = 0x00000004;
     private const uint NotifyIconVersion4 = 4;
     private const int IdiApplication = 0x7F00;
+    private const uint MfString = 0x00000000;
+    private const uint MfSeparator = 0x00000800;
+    private const uint TpmReturnCmd = 0x00000100;
+    private const uint TpmRightButton = 0x00000002;
+    private const int TrayMenuToggleId = 1001;
+    private const int TrayMenuRestartId = 1002;
+    private const int TrayMenuExitId = 1003;
 
     private const int HorizontalMargin = 16;
     private const int VerticalMargin = 16;
@@ -111,6 +127,12 @@ public sealed partial class MainWindow : Window
     private const double CardHeightRatio = 0.92;
     private const double DuplicateMergeWindowSeconds = 2.0;
     private const int HistorySaveDebounceMs = 450;
+    private const int UndoWindowSeconds = 10;
+    private const int TrashRetentionDays = 7;
+    private const int RiskPasteLengthThreshold = 500;
+    private const string PinnedGroupQuick = "quick";
+    private const string PinnedGroupWork = "work";
+    private const string PinnedGroupIdea = "idea";
     private const int DwmwaBorderColor = 34;
     private const uint DwmColorNone = 0xFFFFFFFE;
     private static readonly HttpClient LinkPreviewHttpClient = CreateLinkPreviewHttpClient();
@@ -138,6 +160,12 @@ public sealed partial class MainWindow : Window
     private static readonly Regex WhitespaceRegex = new(
         "\\s+",
         RegexOptions.Compiled);
+    private static readonly Regex EmailLikeRegex = new(
+        @"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex TokenLikeRegex = new(
+        @"\b(?:sk-[A-Za-z0-9]{16,}|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})\b",
+        RegexOptions.Compiled);
     private readonly WndProcDelegate _wndProc;
     private readonly LowLevelKeyboardProc _keyboardProc;
     private readonly LowLevelMouseProc _mouseProc;
@@ -150,6 +178,9 @@ public sealed partial class MainWindow : Window
     private bool _trayIconAdded;
     private NOTIFYICONDATA _trayIconData;
     private AppWindow? _appWindow;
+    private Window? _commandPaletteWindow;
+    private AppWindow? _commandPaletteAppWindow;
+    private bool _isCommandPaletteOpen;
 
     private bool _isOpen;
     private bool _isAnimating;
@@ -175,6 +206,7 @@ public sealed partial class MainWindow : Window
     private int _selectedCardIndex = -1;
     private int _previewCardIndex = -1;
     private string _searchQuery = string.Empty;
+    private string? _activePinnedGroupId;
     private uint _lastClipboardSequence;
     private DispatcherTimer? _scrollInertiaTimer;
     private DispatcherTimer? _agoRefreshTimer;
@@ -204,6 +236,15 @@ public sealed partial class MainWindow : Window
     private DateTimeOffset _suppressDeactivateCloseUntilUtc = DateTimeOffset.MinValue;
     private ClipboardEntry? _cardContextMenuEntry;
     private FrameworkElement? _cardContextPopupAnchor;
+    private bool _isTrashView;
+    private bool _pasteAsPlainText;
+    private ClipboardEntry? _pendingUndoOriginalEntry;
+    private ClipboardEntry? _pendingUndoDeletedEntry;
+    private int _pendingUndoIndex = -1;
+    private DateTimeOffset _pendingUndoExpiresAtUtc = DateTimeOffset.MinValue;
+    private DispatcherTimer? _toastTimer;
+    private Action? _toastAction;
+    private DateTimeOffset _toastHideAtUtc = DateTimeOffset.MinValue;
     private readonly string _historyFilePath = System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "PasteWinUI",
@@ -219,6 +260,7 @@ public sealed partial class MainWindow : Window
         _mouseProc = MouseProc;
         LoadHistoryFromDisk();
         BuildCards();
+        UpdatePinnedGroupFilterButtons();
         OverlayPanel.SizeChanged += (_, _) =>
         {
             UpdateCardSize();
@@ -328,6 +370,8 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        CloseCommandPaletteWindow();
+
         if (_isAnimating)
         {
             _animationTimer?.Stop();
@@ -340,6 +384,24 @@ public sealed partial class MainWindow : Window
         StartSlide(_currentY, _hiddenY, hideWhenDone: true);
         _isOpen = false;
         _overlayClosedAtUtc = DateTimeOffset.UtcNow;
+    }
+
+    private void CloseCommandPaletteWindow()
+    {
+        try
+        {
+            _commandPaletteWindow?.Close();
+        }
+        catch
+        {
+            // Best effort cleanup only.
+        }
+        finally
+        {
+            _commandPaletteWindow = null;
+            _commandPaletteAppWindow = null;
+            _isCommandPaletteOpen = false;
+        }
     }
 
     private void StartSlide(int fromY, int toY, bool hideWhenDone)
@@ -495,11 +557,17 @@ public sealed partial class MainWindow : Window
                 var isDown = keyDown;
                 var isUp = keyUp;
 
-                if (isDown && _isOpen)
+                if (isDown && _isCommandPaletteOpen && vk == VkEscape)
+                {
+                    DispatcherQueue.TryEnqueue(CloseCommandPaletteWindow);
+                    return (IntPtr)1;
+                }
+
+                if (isDown && _isOpen && !_isCommandPaletteOpen)
                 {
                     if (vk == VkReturn)
                     {
-                        DispatcherQueue.TryEnqueue(OnConfirmSelectionRequested);
+                        DispatcherQueue.TryEnqueue(() => OnConfirmSelectionRequested(IsAltPressed()));
                         return (IntPtr)1;
                     }
 
@@ -594,6 +662,11 @@ public sealed partial class MainWindow : Window
     {
         if (nCode >= 0 && (_isOpen || _isAnimating))
         {
+            if (_isCommandPaletteOpen)
+            {
+                return CallNextHookEx(_mouseHook, nCode, wParam, lParam);
+            }
+
             var msg = wParam.ToInt32();
             if (msg == WmLbuttondown || msg == WmRbuttondown || msg == WmMbuttondown || msg == WmXbuttondown)
             {
@@ -773,7 +846,7 @@ public sealed partial class MainWindow : Window
 
     private void OnAgoRefreshTick(object? sender, object e)
     {
-        var removed = PruneEntriesOlderThanOneMonth();
+        var removed = PruneEntriesByRetention();
         if (removed > 0)
         {
             RebuildCards();
@@ -833,7 +906,7 @@ public sealed partial class MainWindow : Window
                 }
             }
 
-            _ = PruneEntriesOlderThanOneMonth();
+            _ = PruneEntriesByRetention();
 
             RebuildCards();
             RefreshAgoLabels();
@@ -889,11 +962,15 @@ public sealed partial class MainWindow : Window
                     item.LinkTitle,
                     item.LinkPreviewImageBytes,
                     item.LinkFaviconImageBytes,
-                    item.LinkHost));
+                    item.LinkHost,
+                    item.IsPinned,
+                    item.IsDeleted,
+                    item.DeletedAtUtc,
+                    item.PinnedGroupId));
             }
 
             _entries.Sort((a, b) => b.CopiedAtUtc.CompareTo(a.CopiedAtUtc));
-            if (PruneEntriesOlderThanOneMonth() > 0)
+            if (PruneEntriesByRetention() > 0)
             {
                 SaveHistoryToDiskNow();
             }
@@ -904,10 +981,13 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private int PruneEntriesOlderThanOneMonth()
+    private int PruneEntriesByRetention()
     {
-        var cutoff = DateTimeOffset.UtcNow.AddMonths(-1);
-        return _entries.RemoveAll(entry => entry.CopiedAtUtc < cutoff);
+        var normalCutoff = DateTimeOffset.UtcNow.AddMonths(-1);
+        var trashCutoff = DateTimeOffset.UtcNow.AddDays(-TrashRetentionDays);
+        return _entries.RemoveAll(entry =>
+            (!entry.IsDeleted && entry.CopiedAtUtc < normalCutoff) ||
+            (entry.IsDeleted && entry.DeletedAtUtc.HasValue && entry.DeletedAtUtc.Value < trashCutoff));
     }
 
     private void ScheduleHistorySave()
@@ -965,7 +1045,11 @@ public sealed partial class MainWindow : Window
                     LinkTitle = entry.LinkTitle,
                     LinkPreviewImageBytes = entry.LinkPreviewImageBytes,
                     LinkFaviconImageBytes = entry.LinkFaviconImageBytes,
-                    LinkHost = entry.LinkHost
+                    LinkHost = entry.LinkHost,
+                    IsPinned = entry.IsPinned,
+                    PinnedGroupId = entry.PinnedGroupId,
+                    IsDeleted = entry.IsDeleted,
+                    DeletedAtUtc = entry.DeletedAtUtc
                 });
             }
 
@@ -995,6 +1079,77 @@ public sealed partial class MainWindow : Window
         var g = (byte)((argb >> 8) & 0xFF);
         var b = (byte)(argb & 0xFF);
         return Color.FromArgb(a, r, g, b);
+    }
+
+    private static string? NormalizePinnedGroupId(string? groupId)
+    {
+        if (string.IsNullOrWhiteSpace(groupId))
+        {
+            return null;
+        }
+
+        return groupId.Trim().ToLowerInvariant() switch
+        {
+            PinnedGroupQuick => PinnedGroupQuick,
+            PinnedGroupWork => PinnedGroupWork,
+            PinnedGroupIdea => PinnedGroupIdea,
+            _ => null
+        };
+    }
+
+    private static string GetPinnedGroupLabel(string? groupId)
+    {
+        return NormalizePinnedGroupId(groupId) switch
+        {
+            PinnedGroupQuick => "Quick",
+            PinnedGroupWork => "Work",
+            PinnedGroupIdea => "Idea",
+            _ => "All"
+        };
+    }
+
+    private static Color GetPinnedGroupColor(string? groupId)
+    {
+        return NormalizePinnedGroupId(groupId) switch
+        {
+            PinnedGroupQuick => Color.FromArgb(255, 245, 158, 11),
+            PinnedGroupWork => Color.FromArgb(255, 34, 197, 94),
+            PinnedGroupIdea => Color.FromArgb(255, 96, 165, 250),
+            _ => Color.FromArgb(255, 138, 160, 175)
+        };
+    }
+
+    private void UpdatePinnedGroupFilterButtons()
+    {
+        if (PinnedGroupAllButton is null ||
+            PinnedGroupQuickButton is null ||
+            PinnedGroupWorkButton is null ||
+            PinnedGroupIdeaButton is null)
+        {
+            return;
+        }
+
+        ApplyPinnedGroupFilterButtonState(PinnedGroupAllButton, null);
+        ApplyPinnedGroupFilterButtonState(PinnedGroupQuickButton, PinnedGroupQuick);
+        ApplyPinnedGroupFilterButtonState(PinnedGroupWorkButton, PinnedGroupWork);
+        ApplyPinnedGroupFilterButtonState(PinnedGroupIdeaButton, PinnedGroupIdea);
+    }
+
+    private void ApplyPinnedGroupFilterButtonState(Button button, string? groupId)
+    {
+        var isActive = string.Equals(_activePinnedGroupId, groupId, StringComparison.Ordinal) ||
+            (groupId is null && string.IsNullOrWhiteSpace(_activePinnedGroupId));
+
+        if (!isActive)
+        {
+            button.Background = new SolidColorBrush(Color.FromArgb(32, 18, 22, 27));
+            button.BorderBrush = new SolidColorBrush(Color.FromArgb(90, 255, 255, 255));
+            return;
+        }
+
+        var color = GetPinnedGroupColor(groupId);
+        button.Background = new SolidColorBrush(Color.FromArgb(58, color.R, color.G, color.B));
+        button.BorderBrush = new SolidColorBrush(Color.FromArgb(165, color.R, color.G, color.B));
     }
 
     private async System.Threading.Tasks.Task<ClipboardEntry?> BuildEntryFromClipboardAsync(
@@ -1255,7 +1410,11 @@ public sealed partial class MainWindow : Window
             linkTitle,
             linkPreviewImageBytes,
             linkFaviconImageBytes,
-            linkHost);
+            linkHost,
+            existing.IsPinned || incoming.IsPinned,
+            existing.IsDeleted || incoming.IsDeleted,
+            existing.DeletedAtUtc ?? incoming.DeletedAtUtc,
+            existing.PinnedGroupId ?? incoming.PinnedGroupId);
     }
 
     private static string ChoosePreferredContent(string preferred, string fallback)
@@ -1737,6 +1896,10 @@ public sealed partial class MainWindow : Window
             {
                 DispatcherQueue.TryEnqueue(ToggleOverlay);
             }
+            else if (trayMsg == WmRbuttonup || trayMsg == WmContextmenu || trayMsg == WmRbuttondown)
+            {
+                DispatcherQueue.TryEnqueue(ShowTrayContextMenu);
+            }
             return IntPtr.Zero;
         }
 
@@ -1755,7 +1918,7 @@ public sealed partial class MainWindow : Window
             var vk = wParam.ToInt32();
             if (vk == VkReturn)
             {
-                DispatcherQueue.TryEnqueue(OnConfirmSelectionRequested);
+                DispatcherQueue.TryEnqueue(() => OnConfirmSelectionRequested(IsAltPressed()));
                 return IntPtr.Zero;
             }
 
@@ -1809,6 +1972,8 @@ public sealed partial class MainWindow : Window
 
     private void OnClosed(object sender, WindowEventArgs args)
     {
+        CloseCommandPaletteWindow();
+
         RemoveTrayIcon();
 
         if (_hwnd != IntPtr.Zero)
@@ -1852,6 +2017,11 @@ public sealed partial class MainWindow : Window
     {
         if (args.WindowActivationState == WindowActivationState.Deactivated)
         {
+            if (_isCommandPaletteOpen)
+            {
+                return;
+            }
+
             if (DateTimeOffset.UtcNow < _suppressDeactivateCloseUntilUtc)
             {
                 return;
@@ -1917,6 +2087,35 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        if (e.Key == Windows.System.VirtualKey.T && IsControlPressed())
+        {
+            ToggleTrashView();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Windows.System.VirtualKey.K && IsControlPressed())
+        {
+            _ = ShowCommandPaletteAsync();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Windows.System.VirtualKey.Z && IsControlPressed())
+        {
+            UndoLastDelete();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Windows.System.VirtualKey.V && IsControlPressed() && IsShiftPressed())
+        {
+            _pasteAsPlainText = !_pasteAsPlainText;
+            ShowToast(_pasteAsPlainText ? "Paste mode: Plain text" : "Paste mode: As-is");
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Windows.System.VirtualKey.Escape && IsSearchBarExpanded())
         {
             CollapseSearchBar(clearQuery: true);
@@ -1926,7 +2125,7 @@ public sealed partial class MainWindow : Window
 
         if (e.Key == Windows.System.VirtualKey.Enter)
         {
-            OnConfirmSelectionRequested();
+            OnConfirmSelectionRequested(IsAltPressed());
             e.Handled = true;
             return;
         }
@@ -1952,7 +2151,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void OnConfirmSelectionRequested()
+    private void OnConfirmSelectionRequested(bool forcePlainTextOnce = false)
     {
         if (_isPastingSelection)
         {
@@ -1960,7 +2159,7 @@ public sealed partial class MainWindow : Window
         }
 
         HideCardPreview();
-        _ = PasteSelectedEntryAsync();
+        _ = PasteSelectedEntryAsync(forcePlainTextOnce);
     }
 
     private void ToggleSelectedCardPreview()
@@ -2016,6 +2215,39 @@ public sealed partial class MainWindow : Window
         _cardContextMenuEntry = entry;
         _cardContextPopupAnchor = anchor;
         _suppressDeactivateCloseUntilUtc = DateTimeOffset.UtcNow.AddMilliseconds(500);
+        var pinVisibility = _isTrashView ? Visibility.Collapsed : Visibility.Visible;
+        CardContextPinQuickButton.Visibility = pinVisibility;
+        CardContextPinWorkButton.Visibility = pinVisibility;
+        CardContextPinIdeaButton.Visibility = pinVisibility;
+        CardContextUnpinButton.Visibility = pinVisibility;
+        CardContextPasteModeButton.Visibility = _isTrashView ? Visibility.Collapsed : Visibility.Visible;
+        CardContextRestoreButton.Visibility = _isTrashView ? Visibility.Visible : Visibility.Collapsed;
+        CardContextDeleteButton.Content = _isTrashView ? "Delete Permanently" : "Move to Trash";
+        CardContextPasteModeButton.Content = _pasteAsPlainText ? "Paste Mode: Plain text" : "Paste Mode: As-is";
+        CardContextUnpinButton.IsEnabled = !string.IsNullOrWhiteSpace(entry.PinnedGroupId);
+
+        var transparent = new SolidColorBrush(Colors.Transparent);
+        CardContextPinQuickButton.Background = transparent;
+        CardContextPinWorkButton.Background = transparent;
+        CardContextPinIdeaButton.Background = transparent;
+        CardContextPinQuickButton.BorderBrush = transparent;
+        CardContextPinWorkButton.BorderBrush = transparent;
+        CardContextPinIdeaButton.BorderBrush = transparent;
+
+        var selectedGroup = NormalizePinnedGroupId(entry.PinnedGroupId);
+        var selectedButton = selectedGroup switch
+        {
+            PinnedGroupQuick => CardContextPinQuickButton,
+            PinnedGroupWork => CardContextPinWorkButton,
+            PinnedGroupIdea => CardContextPinIdeaButton,
+            _ => null
+        };
+        if (selectedButton is not null)
+        {
+            var accent = GetPinnedGroupColor(selectedGroup);
+            selectedButton.Background = new SolidColorBrush(Color.FromArgb(52, accent.R, accent.G, accent.B));
+            selectedButton.BorderBrush = new SolidColorBrush(Color.FromArgb(140, accent.R, accent.G, accent.B));
+        }
 
         CardContextPopup.IsOpen = false;
         PositionCardContextPopupForAnchor(anchor);
@@ -2080,10 +2312,85 @@ public sealed partial class MainWindow : Window
         DeleteEntry(target);
     }
 
+    private void CardContextPinQuickButton_Click(object sender, RoutedEventArgs e)
+    {
+        var target = _cardContextMenuEntry;
+        HideCardContextPopup();
+        SetEntryPinnedGroup(target, PinnedGroupQuick);
+    }
+
+    private void CardContextPinWorkButton_Click(object sender, RoutedEventArgs e)
+    {
+        var target = _cardContextMenuEntry;
+        HideCardContextPopup();
+        SetEntryPinnedGroup(target, PinnedGroupWork);
+    }
+
+    private void CardContextPinIdeaButton_Click(object sender, RoutedEventArgs e)
+    {
+        var target = _cardContextMenuEntry;
+        HideCardContextPopup();
+        SetEntryPinnedGroup(target, PinnedGroupIdea);
+    }
+
+    private void CardContextUnpinButton_Click(object sender, RoutedEventArgs e)
+    {
+        var target = _cardContextMenuEntry;
+        HideCardContextPopup();
+        SetEntryPinnedGroup(target, null);
+    }
+
+    private void CardContextPasteModeButton_Click(object sender, RoutedEventArgs e)
+    {
+        _pasteAsPlainText = !_pasteAsPlainText;
+        CardContextPasteModeButton.Content = _pasteAsPlainText ? "Paste Mode: Plain text" : "Paste Mode: As-is";
+        ShowToast(_pasteAsPlainText ? "Paste mode: Plain text" : "Paste mode: As-is");
+    }
+
+    private void CardContextRestoreButton_Click(object sender, RoutedEventArgs e)
+    {
+        var target = _cardContextMenuEntry;
+        HideCardContextPopup();
+        if (target is null)
+        {
+            return;
+        }
+
+        RestoreEntryFromTrash(target);
+    }
+
     private void CardContextPopup_Closed(object sender, object e)
     {
         _cardContextMenuEntry = null;
         _cardContextPopupAnchor = null;
+    }
+
+    private void SetEntryPinnedGroup(ClipboardEntry? target, string? groupId)
+    {
+        if (target is null || target.IsDeleted)
+        {
+            return;
+        }
+
+        var index = _entries.IndexOf(target);
+        if (index < 0)
+        {
+            return;
+        }
+
+        var normalized = NormalizePinnedGroupId(groupId);
+        var next = CloneEntry(target, pinnedGroupId: normalized, overwritePinnedGroup: true);
+        _entries[index] = next;
+        RebuildCards();
+        ScheduleHistorySave();
+
+        if (normalized is null)
+        {
+            ShowToast("Unpinned");
+            return;
+        }
+
+        ShowToast($"Pinned to {GetPinnedGroupLabel(normalized)}");
     }
 
     private void PositionPreviewBubble()
@@ -2190,7 +2497,7 @@ public sealed partial class MainWindow : Window
         return null;
     }
 
-    private async System.Threading.Tasks.Task PasteSelectedEntryAsync()
+    private async System.Threading.Tasks.Task PasteSelectedEntryAsync(bool forcePlainTextOnce = false)
     {
         if (_isPastingSelection)
         {
@@ -2206,9 +2513,16 @@ public sealed partial class MainWindow : Window
         try
         {
             var selectedEntry = _filteredEntries[_selectedCardIndex];
-            var clipboardApplied = await TryApplyEntryToClipboardAsync(selectedEntry);
+            if (!await ConfirmRiskyPasteAsync(selectedEntry))
+            {
+                ShowToast("Paste canceled");
+                return;
+            }
+
+            var clipboardApplied = await TryApplyEntryToClipboardAsync(selectedEntry, forcePlainTextOnce);
             if (!clipboardApplied)
             {
+                ShowToast("Failed to prepare clipboard", "Retry", () => _ = PasteSelectedEntryAsync(forcePlainTextOnce), 5);
                 return;
             }
 
@@ -2228,6 +2542,8 @@ public sealed partial class MainWindow : Window
 
             _ = BringWindowToTop(targetWindow);
             InjectEntryIntoTarget(targetWindow);
+            var plainTextApplied = _pasteAsPlainText || forcePlainTextOnce;
+            ShowToast(plainTextApplied ? "Pasted (plain text)" : "Pasted");
         }
         finally
         {
@@ -2296,8 +2612,9 @@ public sealed partial class MainWindow : Window
         return hwnd;
     }
 
-    private async System.Threading.Tasks.Task<bool> TryApplyEntryToClipboardAsync(ClipboardEntry entry)
+    private async System.Threading.Tasks.Task<bool> TryApplyEntryToClipboardAsync(ClipboardEntry entry, bool forcePlainTextOnce = false)
     {
+        var plainTextApplied = _pasteAsPlainText || forcePlainTextOnce;
         for (var attempt = 0; attempt < 5; attempt++)
         {
             try
@@ -2321,11 +2638,11 @@ public sealed partial class MainWindow : Window
                 else if (string.Equals(entry.Kind, "Link", StringComparison.Ordinal))
                 {
                     var linkText = string.IsNullOrWhiteSpace(entry.LinkUrl) ? entry.Content : entry.LinkUrl!;
-                    if (Uri.TryCreate(linkText, UriKind.Absolute, out var uri))
+                    if (!plainTextApplied && Uri.TryCreate(linkText, UriKind.Absolute, out var uri))
                     {
                         package.SetWebLink(uri);
                     }
-                    package.SetText(linkText);
+                    package.SetText(plainTextApplied ? entry.Content : linkText);
                 }
                 else
                 {
@@ -2346,6 +2663,69 @@ public sealed partial class MainWindow : Window
 
                 await System.Threading.Tasks.Task.Delay(25);
             }
+        }
+
+        return false;
+    }
+
+    private async System.Threading.Tasks.Task<bool> ConfirmRiskyPasteAsync(ClipboardEntry entry)
+    {
+        if (!TryGetPasteRiskReason(entry, out var reason))
+        {
+            return true;
+        }
+
+        var dialog = new ContentDialog
+        {
+            Title = "Confirm Paste",
+            Content = new TextBlock
+            {
+                Text = reason,
+                TextWrapping = TextWrapping.WrapWholeWords
+            },
+            PrimaryButtonText = "Paste",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = Root.XamlRoot
+        };
+
+        var result = await dialog.ShowAsync();
+        return result == ContentDialogResult.Primary;
+    }
+
+    private static bool TryGetPasteRiskReason(ClipboardEntry entry, out string reason)
+    {
+        reason = string.Empty;
+        if (!string.Equals(entry.Kind, "Text", StringComparison.Ordinal) &&
+            !string.Equals(entry.Kind, "Link", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var text = string.Equals(entry.Kind, "Link", StringComparison.Ordinal)
+            ? (string.IsNullOrWhiteSpace(entry.LinkUrl) ? entry.Content : entry.LinkUrl!)
+            : entry.Content;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        if (text.Length >= RiskPasteLengthThreshold)
+        {
+            reason = $"Large paste detected ({text.Length:N0} characters).";
+            return true;
+        }
+
+        if (text.Contains('\n'))
+        {
+            reason = "Multi-line content detected.";
+            return true;
+        }
+
+        if (EmailLikeRegex.IsMatch(text) || TokenLikeRegex.IsMatch(text))
+        {
+            reason = "Sensitive-looking content detected.";
+            return true;
         }
 
         return false;
@@ -2954,6 +3334,18 @@ public sealed partial class MainWindow : Window
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern bool Shell_NotifyIcon(uint dwMessage, ref NOTIFYICONDATA lpData);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr CreatePopupMenu();
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool AppendMenu(IntPtr hMenu, uint uFlags, UIntPtr uIDNewItem, string? lpNewItem);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr TrackPopupMenuEx(IntPtr hmenu, uint fuFlags, int x, int y, IntPtr hwnd, IntPtr lptpm);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool DestroyMenu(IntPtr hMenu);
+
     private void ApplyRoundedWindowRegion(int width, int height)
     {
         if (_hwnd == IntPtr.Zero || width <= 0 || height <= 0)
@@ -3129,6 +3521,101 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void ShowTrayContextMenu()
+    {
+        if (_hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        if (!GetCursorPos(out var pt))
+        {
+            return;
+        }
+
+        var menu = CreatePopupMenu();
+        if (menu == IntPtr.Zero)
+        {
+            return;
+        }
+
+        try
+        {
+            _ = AppendMenu(menu, MfString, (UIntPtr)TrayMenuToggleId, _isOpen ? "Hide" : "Show");
+            _ = AppendMenu(menu, MfSeparator, UIntPtr.Zero, null);
+            _ = AppendMenu(menu, MfString, (UIntPtr)TrayMenuRestartId, "Restart");
+            _ = AppendMenu(menu, MfString, (UIntPtr)TrayMenuExitId, "Exit");
+
+            _ = SetForegroundWindow(_hwnd);
+            var command = TrackPopupMenuEx(
+                menu,
+                TpmReturnCmd | TpmRightButton,
+                pt.X,
+                pt.Y,
+                _hwnd,
+                IntPtr.Zero);
+
+            switch (command.ToInt32())
+            {
+                case TrayMenuToggleId:
+                    ToggleOverlay();
+                    break;
+                case TrayMenuRestartId:
+                    RestartApplication();
+                    break;
+                case TrayMenuExitId:
+                    ExitApplication();
+                    break;
+            }
+        }
+        finally
+        {
+            _ = DestroyMenu(menu);
+        }
+    }
+
+    private void RestartApplication()
+    {
+        try
+        {
+            var processPath = Environment.ProcessPath;
+            if (!string.IsNullOrWhiteSpace(processPath) && File.Exists(processPath))
+            {
+                var startInfo = new ProcessStartInfo(processPath)
+                {
+                    UseShellExecute = true,
+                    WorkingDirectory = System.IO.Path.GetDirectoryName(processPath) ?? Environment.CurrentDirectory
+                };
+                _ = Process.Start(startInfo);
+            }
+            else
+            {
+                var entryAssemblyPath = System.Reflection.Assembly.GetEntryAssembly()?.Location;
+                if (!string.IsNullOrWhiteSpace(entryAssemblyPath) && File.Exists(entryAssemblyPath))
+                {
+                    var startInfo = new ProcessStartInfo("dotnet", $"\"{entryAssemblyPath}\"")
+                    {
+                        UseShellExecute = true,
+                        WorkingDirectory = System.IO.Path.GetDirectoryName(entryAssemblyPath) ?? Environment.CurrentDirectory
+                    };
+                    _ = Process.Start(startInfo);
+                }
+            }
+        }
+        catch
+        {
+            // Best effort restart.
+        }
+
+        ExitApplication();
+    }
+
+    private void ExitApplication()
+    {
+        RemoveTrayIcon();
+        Application.Current.Exit();
+    }
+
     private void BuildCards()
     {
         RebuildCards();
@@ -3142,6 +3629,29 @@ public sealed partial class MainWindow : Window
     private void SearchCloseButton_Click(object sender, RoutedEventArgs e)
     {
         CollapseSearchBar(clearQuery: true);
+    }
+
+    private void PinnedGroupFilterButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement element)
+        {
+            return;
+        }
+
+        var nextGroupId = NormalizePinnedGroupId(element.Tag as string);
+        if (string.Equals(element.Tag as string, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            nextGroupId = null;
+        }
+
+        if (string.Equals(_activePinnedGroupId, nextGroupId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _activePinnedGroupId = nextGroupId;
+        UpdatePinnedGroupFilterButtons();
+        RebuildCards();
     }
 
     private void SearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -3185,7 +3695,7 @@ public sealed partial class MainWindow : Window
         }
 
         SearchTextBox.IsEnabled = true;
-        SearchToggleButton.Visibility = Visibility.Collapsed;
+        SearchCompactControls.Visibility = Visibility.Collapsed;
         SearchBarShell.Visibility = Visibility.Visible;
         SetSearchAnimationProgress(0.0);
         StartSearchAnimation(expanding: true, clearQueryOnCollapse: false);
@@ -3206,6 +3716,20 @@ public sealed partial class MainWindow : Window
         return (GetAsyncKeyState(VkControlKey) & 0x8000) != 0 ||
             (GetAsyncKeyState(VkLcontrol) & 0x8000) != 0 ||
             (GetAsyncKeyState(VkRcontrol) & 0x8000) != 0;
+    }
+
+    private static bool IsShiftPressed()
+    {
+        return (GetAsyncKeyState(VkShiftKey) & 0x8000) != 0 ||
+            (GetAsyncKeyState(VkLshift) & 0x8000) != 0 ||
+            (GetAsyncKeyState(VkRshift) & 0x8000) != 0;
+    }
+
+    private static bool IsAltPressed()
+    {
+        return (GetAsyncKeyState(VkMenuKey) & 0x8000) != 0 ||
+            (GetAsyncKeyState(VkLmenu) & 0x8000) != 0 ||
+            (GetAsyncKeyState(VkRmenu) & 0x8000) != 0;
     }
 
     private void StartSearchAnimation(bool expanding, bool clearQueryOnCollapse, bool restoreFocusOnCollapse = true)
@@ -3246,7 +3770,7 @@ public sealed partial class MainWindow : Window
         SetSearchAnimationProgress(0.0);
         SearchBarShell.Visibility = Visibility.Collapsed;
         SearchTextBox.IsEnabled = false;
-        SearchToggleButton.Visibility = Visibility.Visible;
+        SearchCompactControls.Visibility = Visibility.Visible;
         if (_searchAnimationRestoreFocusOnCollapse)
         {
             ActivateAndFocusInput();
@@ -3273,7 +3797,7 @@ public sealed partial class MainWindow : Window
         SearchBarScaleTransform.ScaleX = 0.65 + (progress * 0.35);
         SearchBarScaleTransform.ScaleY = 0.96 + (progress * 0.04);
         SearchCloseButton.Opacity = Math.Clamp(progress * 1.2, 0.0, 1.0);
-        SearchToggleButton.Opacity = Math.Clamp(1.0 - (progress * 1.35), 0.0, 1.0);
+        SearchCompactControls.Opacity = Math.Clamp(1.0 - (progress * 1.35), 0.0, 1.0);
     }
 
     private void CollapseSearchBar(bool clearQuery, bool restoreFocus = true)
@@ -3311,13 +3835,28 @@ public sealed partial class MainWindow : Window
     {
         _filteredEntries.Clear();
 
+        IEnumerable<ClipboardEntry> visibleEntries = _entries
+            .Where(entry => _isTrashView ? entry.IsDeleted : !entry.IsDeleted);
+
+        if (!string.IsNullOrWhiteSpace(_activePinnedGroupId))
+        {
+            visibleEntries = visibleEntries.Where(entry =>
+                string.Equals(entry.PinnedGroupId, _activePinnedGroupId, StringComparison.Ordinal));
+        }
+
+        var orderedEntries = string.IsNullOrWhiteSpace(_activePinnedGroupId)
+            ? visibleEntries
+                .OrderByDescending(entry => !string.IsNullOrWhiteSpace(entry.PinnedGroupId))
+                .ThenByDescending(entry => entry.CopiedAtUtc)
+            : visibleEntries.OrderByDescending(entry => entry.CopiedAtUtc);
+
         if (string.IsNullOrWhiteSpace(_searchQuery))
         {
-            _filteredEntries.AddRange(_entries);
+            _filteredEntries.AddRange(orderedEntries);
             return;
         }
 
-        foreach (var entry in _entries)
+        foreach (var entry in orderedEntries)
         {
             if (EntryMatchesSearch(entry, _searchQuery))
             {
@@ -3343,6 +3882,7 @@ public sealed partial class MainWindow : Window
 
     private void RebuildCards()
     {
+        _ = PruneEntriesByRetention();
         UpdateFilteredEntries();
         HideCardPreview();
         HideCardContextPopup();
@@ -3364,6 +3904,9 @@ public sealed partial class MainWindow : Window
         {
             SetSelectedCard(0);
         }
+
+        UpdateEmptyState();
+        UpdateTrashToggleVisualState();
         UpdateCardSize();
     }
 
@@ -3388,9 +3931,28 @@ public sealed partial class MainWindow : Window
 
     private void DeleteEntry(ClipboardEntry entry)
     {
-        if (!_entries.Remove(entry))
+        var index = _entries.IndexOf(entry);
+        if (index < 0)
         {
             return;
+        }
+
+        if (_isTrashView || entry.IsDeleted)
+        {
+            _entries.RemoveAt(index);
+            ShowToast("Deleted permanently");
+        }
+        else
+        {
+            var deletedEntry = CloneEntry(entry, isDeleted: true, deletedAtUtc: DateTimeOffset.UtcNow);
+            _entries[index] = deletedEntry;
+
+            _pendingUndoOriginalEntry = entry;
+            _pendingUndoDeletedEntry = deletedEntry;
+            _pendingUndoIndex = index;
+            _pendingUndoExpiresAtUtc = DateTimeOffset.UtcNow.AddSeconds(UndoWindowSeconds);
+
+            ShowToast("Moved to Trash", "Undo", UndoLastDelete, UndoWindowSeconds);
         }
 
         HideCardPreview();
@@ -3398,6 +3960,840 @@ public sealed partial class MainWindow : Window
         RebuildCards();
         RefreshAgoLabels();
         ScheduleHistorySave();
+    }
+
+    private void RestoreEntryFromTrash(ClipboardEntry entry)
+    {
+        var index = _entries.IndexOf(entry);
+        if (index < 0)
+        {
+            return;
+        }
+
+        var restored = CloneEntry(entry, isDeleted: false, deletedAtUtc: null);
+        _entries[index] = restored;
+        ShowToast("Restored from Trash");
+        RebuildCards();
+        ScheduleHistorySave();
+    }
+
+    private void ToggleTrashView()
+    {
+        _isTrashView = !_isTrashView;
+        RebuildCards();
+        ShowToast(_isTrashView ? "Trash view" : "History view");
+    }
+
+    private void TrashToggleButton_Click(object sender, RoutedEventArgs e)
+    {
+        ToggleTrashView();
+    }
+
+    private void UpdateTrashToggleVisualState()
+    {
+        TrashToggleButton.Opacity = _isTrashView ? 1.0 : 0.82;
+        TrashToggleButton.BorderBrush = _isTrashView
+            ? new SolidColorBrush(Color.FromArgb(220, 255, 180, 105))
+            : new SolidColorBrush(Color.FromArgb(90, 255, 255, 255));
+    }
+
+    private void UpdateEmptyState()
+    {
+        if (_filteredEntries.Count > 0)
+        {
+            EmptyStatePanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        EmptyStatePanel.Visibility = Visibility.Visible;
+        if (_isTrashView)
+        {
+            EmptyStateTitleText.Text = "Trash is empty";
+            EmptyStateBodyText.Text = "Deleted items appear here. Use Ctrl+T to return to history.";
+            return;
+        }
+
+        EmptyStateTitleText.Text = "Clipboard history is empty";
+        EmptyStateBodyText.Text = "Copy something and open with Ctrl+Alt+V. Shortcuts: Ctrl+F Search, Ctrl+T Trash, Alt+Enter Plain Paste.";
+    }
+
+    private void ShowToast(string message, string? actionLabel = null, Action? action = null, int seconds = 3)
+    {
+        ToastMessageText.Text = message;
+        _toastAction = action;
+        if (!string.IsNullOrWhiteSpace(actionLabel) && action is not null)
+        {
+            ToastActionButton.Content = actionLabel;
+            ToastActionButton.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            ToastActionButton.Visibility = Visibility.Collapsed;
+        }
+
+        ToastPanel.Visibility = Visibility.Visible;
+
+        _toastTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
+        _toastTimer.Stop();
+        _toastTimer.Tick -= OnToastTick;
+        _toastTimer.Tick += OnToastTick;
+        _toastHideAtUtc = DateTimeOffset.UtcNow.AddSeconds(Math.Max(1, seconds));
+        _toastTimer.Interval = TimeSpan.FromMilliseconds(200);
+        _toastTimer.Start();
+    }
+
+    private void OnToastTick(object? sender, object e)
+    {
+        if (DateTimeOffset.UtcNow <= _toastHideAtUtc)
+        {
+            return;
+        }
+
+        _toastTimer?.Stop();
+        _toastAction = null;
+        ToastPanel.Visibility = Visibility.Collapsed;
+        ToastActionButton.Visibility = Visibility.Collapsed;
+    }
+
+    private void ToastActionButton_Click(object sender, RoutedEventArgs e)
+    {
+        var action = _toastAction;
+        _toastAction = null;
+        _toastTimer?.Stop();
+        ToastPanel.Visibility = Visibility.Collapsed;
+        ToastActionButton.Visibility = Visibility.Collapsed;
+        action?.Invoke();
+    }
+
+    private void UndoLastDelete()
+    {
+        if (_pendingUndoOriginalEntry is null || _pendingUndoDeletedEntry is null)
+        {
+            return;
+        }
+
+        if (DateTimeOffset.UtcNow > _pendingUndoExpiresAtUtc)
+        {
+            _pendingUndoOriginalEntry = null;
+            _pendingUndoDeletedEntry = null;
+            _pendingUndoIndex = -1;
+            return;
+        }
+
+        var index = _entries.FindIndex(entry => ReferenceEquals(entry, _pendingUndoDeletedEntry));
+        if (index < 0 && _pendingUndoIndex >= 0 && _pendingUndoIndex < _entries.Count)
+        {
+            index = _pendingUndoIndex;
+        }
+
+        if (index < 0 || index >= _entries.Count)
+        {
+            return;
+        }
+
+        _entries[index] = _pendingUndoOriginalEntry;
+        _pendingUndoOriginalEntry = null;
+        _pendingUndoDeletedEntry = null;
+        _pendingUndoIndex = -1;
+        RebuildCards();
+        ScheduleHistorySave();
+        ShowToast("Delete undone");
+    }
+
+    private async System.Threading.Tasks.Task ShowCommandPaletteAsync()
+    {
+        if (_isCommandPaletteOpen)
+        {
+            _commandPaletteWindow?.Activate();
+            return;
+        }
+
+        _isCommandPaletteOpen = true;
+        var commands = BuildCommandPaletteActions();
+        var resultRows = new List<ListViewItem>();
+        _suppressDeactivateCloseUntilUtc = DateTimeOffset.UtcNow.AddMilliseconds(500);
+
+        var shellBorder = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(236, 20, 25, 31)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(125, 255, 255, 255)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(16, 14, 16, 12)
+        };
+
+        var rootPanel = new Grid();
+        rootPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        rootPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        rootPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        rootPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        shellBorder.Child = rootPanel;
+
+        var headerGrid = new Grid();
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        headerGrid.Children.Add(new TextBlock
+        {
+                Text = "Command Palette",
+                FontSize = 18,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromArgb(246, 245, 248, 252))
+            });
+        var hint = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(50, 255, 180, 105)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(130, 255, 180, 105)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(10, 4, 10, 4),
+            Child = new TextBlock
+            {
+                Text = "Ctrl+K",
+                FontSize = 11.5,
+                Foreground = new SolidColorBrush(Color.FromArgb(240, 255, 214, 168))
+            }
+        };
+        Grid.SetColumn(hint, 1);
+        headerGrid.Children.Add(hint);
+        Grid.SetRow(headerGrid, 0);
+        rootPanel.Children.Add(headerGrid);
+
+        var queryBox = new TextBox
+        {
+            PlaceholderText = "Type a command (trash, paste, undo)...",
+            MinHeight = 40,
+            BorderBrush = new SolidColorBrush(Color.FromArgb(140, 255, 255, 255)),
+            Background = new SolidColorBrush(Color.FromArgb(90, 10, 14, 19)),
+            Foreground = new SolidColorBrush(Color.FromArgb(245, 245, 247, 250)),
+            Padding = new Thickness(12, 6, 12, 6),
+            Margin = new Thickness(0, 10, 0, 10)
+        };
+        queryBox.Resources["TextControlBorderBrushFocused"] = new SolidColorBrush(Color.FromArgb(255, 242, 177, 109));
+        queryBox.Resources["TextControlBorderBrushPointerOver"] = new SolidColorBrush(Color.FromArgb(190, 255, 255, 255));
+        Grid.SetRow(queryBox, 1);
+        rootPanel.Children.Add(queryBox);
+
+        var listView = new ListView
+        {
+            SelectionMode = ListViewSelectionMode.Single,
+            IsItemClickEnabled = true,
+            Background = new SolidColorBrush(Color.FromArgb(24, 255, 255, 255)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(60, 255, 255, 255)),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(8)
+        };
+        Grid.SetRow(listView, 2);
+        rootPanel.Children.Add(listView);
+
+        var helpText = new TextBlock
+        {
+            Text = "Enter: Run  •  Esc: Close  •  Alt+Enter: One-time plain paste",
+            FontSize = 11,
+            Foreground = new SolidColorBrush(Color.FromArgb(175, 210, 218, 228)),
+            Margin = new Thickness(2, 10, 2, 0)
+        };
+        Grid.SetRow(helpText, 3);
+        rootPanel.Children.Add(helpText);
+
+        var paletteWindow = new Window
+        {
+            Content = shellBorder
+        };
+        _commandPaletteWindow = paletteWindow;
+        paletteWindow.Closed += (_, _) =>
+        {
+            _commandPaletteWindow = null;
+            _commandPaletteAppWindow = null;
+            _isCommandPaletteOpen = false;
+        };
+        paletteWindow.Activate();
+
+        var paletteHwnd = WindowNative.GetWindowHandle(paletteWindow);
+        if (paletteHwnd != IntPtr.Zero)
+        {
+            var paletteWindowId = Win32Interop.GetWindowIdFromWindow(paletteHwnd);
+            _commandPaletteAppWindow = AppWindow.GetFromWindowId(paletteWindowId);
+            if (_commandPaletteAppWindow?.Presenter is OverlappedPresenter presenter)
+            {
+                presenter.SetBorderAndTitleBar(false, false);
+                presenter.IsResizable = false;
+                presenter.IsMaximizable = false;
+                presenter.IsMinimizable = false;
+                presenter.IsAlwaysOnTop = true;
+            }
+
+            var monitorInfo = GetCursorMonitorInfo();
+            var work = monitorInfo.rcWork;
+            var workWidth = work.Right - work.Left;
+            var workHeight = work.Bottom - work.Top;
+            var maxWidth = Math.Max(360, workWidth - (HorizontalMargin * 2));
+            var targetWidth = (int)Math.Round(workWidth * 0.52);
+            var paletteWidth = maxWidth < 680
+                ? maxWidth
+                : Math.Clamp(targetWidth, 680, maxWidth);
+
+            var maxHeight = Math.Max(300, workHeight - (VerticalMargin * 2));
+            var targetHeight = (int)Math.Round(workHeight * 0.62);
+            var paletteHeight = Math.Clamp(targetHeight, 420, maxHeight);
+
+            var paletteX = work.Left + ((workWidth - paletteWidth) / 2);
+            var paletteY = Math.Max(work.Top + VerticalMargin, work.Bottom - paletteHeight - 24);
+            _commandPaletteAppWindow?.MoveAndResize(new RectInt32(paletteX, paletteY, paletteWidth, paletteHeight));
+        }
+
+        List<CommandPaletteActionItem> MatchActions(string query)
+        {
+            return commands
+                .Where(item =>
+                    string.IsNullOrWhiteSpace(query) ||
+                    item.Title.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                    item.Description.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                    item.Shortcut.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                    item.Category.Contains(query, StringComparison.OrdinalIgnoreCase))
+                .Take(40)
+                .ToList();
+        }
+
+        ListViewItem CreateCategoryHeader(string title)
+        {
+            return new ListViewItem
+            {
+                IsEnabled = false,
+                IsHitTestVisible = false,
+                Padding = new Thickness(6, 12, 6, 6),
+                Content = new TextBlock
+                {
+                    Text = title,
+                    FontSize = 11,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = new SolidColorBrush(Color.FromArgb(165, 170, 179, 191))
+                }
+            };
+        }
+
+        ListViewItem CreateActionItem(CommandPaletteActionItem item)
+        {
+            var severityColor = item.Severity == CommandPaletteSeverity.Warning
+                ? Color.FromArgb(230, 255, 198, 122)
+                : Color.FromArgb(232, 240, 245, 250);
+
+            var row = new Grid
+            {
+                ColumnSpacing = 12
+            };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var accentBar = new Border
+            {
+                CornerRadius = new CornerRadius(2),
+                Background = new SolidColorBrush(item.Severity == CommandPaletteSeverity.Warning
+                    ? Color.FromArgb(255, 204, 122, 58)
+                    : Color.FromArgb(255, 242, 177, 109))
+            };
+            Grid.SetColumn(accentBar, 0);
+            row.Children.Add(accentBar);
+
+            var textCol = new StackPanel
+            {
+                Spacing = 3
+            };
+            Grid.SetColumn(textCol, 1);
+            textCol.Children.Add(new TextBlock
+            {
+                Text = item.Title,
+                FontSize = 14.5,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(severityColor)
+            });
+            textCol.Children.Add(new TextBlock
+            {
+                Text = item.Description,
+                FontSize = 12,
+                MaxLines = 2,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                TextWrapping = TextWrapping.WrapWholeWords,
+                Foreground = new SolidColorBrush(Color.FromArgb(195, 205, 214, 225))
+            });
+            row.Children.Add(textCol);
+
+            var shortcutBadge = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(42, 255, 255, 255)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(90, 255, 255, 255)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(7),
+                Padding = new Thickness(9, 4, 9, 4),
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = new TextBlock
+                {
+                    Text = item.Shortcut,
+                    FontSize = 10.5,
+                    Foreground = new SolidColorBrush(Color.FromArgb(220, 228, 235, 244))
+                }
+            };
+            Grid.SetColumn(shortcutBadge, 2);
+            row.Children.Add(shortcutBadge);
+
+            return new ListViewItem
+            {
+                Content = row,
+                Tag = item,
+                Margin = new Thickness(0, 3, 0, 3),
+                Padding = new Thickness(10, 7, 10, 7),
+                CornerRadius = new CornerRadius(8),
+                Background = new SolidColorBrush(Color.FromArgb(24, 255, 255, 255))
+            };
+        }
+
+        ListViewItem CreateNoResultsItem()
+        {
+            return new ListViewItem
+            {
+                IsEnabled = false,
+                IsHitTestVisible = false,
+                Padding = new Thickness(14, 14, 14, 14),
+                Content = new StackPanel
+                {
+                    Spacing = 6,
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = "No commands found",
+                            FontSize = 13,
+                            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                            Foreground = new SolidColorBrush(Color.FromArgb(230, 244, 248, 252))
+                        },
+                        new TextBlock
+                        {
+                            Text = "Try: trash, paste, undo, search",
+                            FontSize = 11.5,
+                            Foreground = new SolidColorBrush(Color.FromArgb(190, 205, 214, 225))
+                        }
+                    }
+                }
+            };
+        }
+
+        void SelectFirstActionItem()
+        {
+            for (var i = 0; i < resultRows.Count; i++)
+            {
+                if (resultRows[i].Tag is CommandPaletteActionItem)
+                {
+                    listView.SelectedIndex = i;
+                    listView.ScrollIntoView(resultRows[i], ScrollIntoViewAlignment.Leading);
+                    return;
+                }
+            }
+
+            listView.SelectedItem = null;
+        }
+
+        void RenderList(string query)
+        {
+            var matched = MatchActions(query);
+            listView.Items.Clear();
+            resultRows.Clear();
+
+            if (matched.Count == 0)
+            {
+                var noResult = CreateNoResultsItem();
+                listView.Items.Add(noResult);
+                resultRows.Add(noResult);
+                listView.SelectedItem = null;
+                return;
+            }
+
+            var categoryOrder = new[] { "Navigation", "Paste", "Edit", "Help" };
+            foreach (var category in categoryOrder)
+            {
+                var inCategory = matched.Where(item => string.Equals(item.Category, category, StringComparison.Ordinal)).ToList();
+                if (inCategory.Count == 0)
+                {
+                    continue;
+                }
+
+                var header = CreateCategoryHeader(category);
+                listView.Items.Add(header);
+                resultRows.Add(header);
+
+                foreach (var item in inCategory)
+                {
+                    var row = CreateActionItem(item);
+                    listView.Items.Add(row);
+                    resultRows.Add(row);
+                }
+            }
+
+            SelectFirstActionItem();
+        }
+
+        queryBox.TextChanged += (_, _) => RenderList(queryBox.Text);
+        queryBox.KeyDown += (_, args) =>
+        {
+            if (args.Key == Windows.System.VirtualKey.Down && listView.Items.Count > 0)
+            {
+                listView.Focus(FocusState.Programmatic);
+                if (listView.SelectedItem is null)
+                {
+                    SelectFirstActionItem();
+                }
+                args.Handled = true;
+                return;
+            }
+
+            if (args.Key == Windows.System.VirtualKey.Escape)
+            {
+                CloseCommandPaletteWindow();
+                args.Handled = true;
+                return;
+            }
+
+            if (args.Key == Windows.System.VirtualKey.Enter)
+            {
+                if (listView.SelectedItem is ListViewItem selected &&
+                    selected.Tag is CommandPaletteActionItem action)
+                {
+                    CloseCommandPaletteWindow();
+                    _ = action.ExecuteAsync();
+                    args.Handled = true;
+                }
+            }
+        };
+
+        listView.ItemClick += async (_, args) =>
+        {
+            if (args.ClickedItem is ListViewItem item &&
+                item.Tag is CommandPaletteActionItem action)
+            {
+                CloseCommandPaletteWindow();
+                await action.ExecuteAsync();
+            }
+        };
+        listView.KeyDown += (_, args) =>
+        {
+            if (args.Key == Windows.System.VirtualKey.Escape)
+            {
+                CloseCommandPaletteWindow();
+                args.Handled = true;
+                return;
+            }
+
+            if (args.Key == Windows.System.VirtualKey.Enter &&
+                listView.SelectedItem is ListViewItem selected &&
+                selected.Tag is CommandPaletteActionItem action)
+            {
+                CloseCommandPaletteWindow();
+                _ = action.ExecuteAsync();
+                args.Handled = true;
+            }
+        };
+
+        RenderList(string.Empty);
+        _ = queryBox.Focus(FocusState.Programmatic);
+        queryBox.SelectAll();
+        await System.Threading.Tasks.Task.CompletedTask;
+    }
+
+    private List<CommandPaletteActionItem> BuildCommandPaletteActions()
+    {
+        return new List<CommandPaletteActionItem>
+        {
+            new(
+                _isTrashView ? "Go To History" : "Open Trash",
+                _isTrashView ? "Switch back to active clipboard history" : "View deleted entries",
+                "Ctrl+T",
+                "Navigation",
+                () =>
+                {
+                    ToggleTrashView();
+                    return System.Threading.Tasks.Task.CompletedTask;
+                }),
+            new(
+                _pasteAsPlainText ? "Paste Mode: As-is" : "Paste Mode: Plain text",
+                "Toggle how text/link is applied to clipboard before paste",
+                "Ctrl+Shift+V",
+                "Paste",
+                () =>
+                {
+                    _pasteAsPlainText = !_pasteAsPlainText;
+                    ShowToast(_pasteAsPlainText ? "Paste mode: Plain text" : "Paste mode: As-is");
+                    return System.Threading.Tasks.Task.CompletedTask;
+                }),
+            new(
+                "Undo Last Delete",
+                "Restore the most recently trashed item",
+                "Ctrl+Z",
+                "Edit",
+                () =>
+                {
+                    UndoLastDelete();
+                    return System.Threading.Tasks.Task.CompletedTask;
+                }),
+            new(
+                "Focus Search",
+                "Open search box and move focus",
+                "Ctrl+F",
+                "Navigation",
+                () =>
+                {
+                    ExpandSearchBar();
+                    return System.Threading.Tasks.Task.CompletedTask;
+                }),
+            new(
+                "Clear Search Query",
+                "Reset filter and show all visible entries",
+                "Esc (when search open)",
+                "Navigation",
+                () =>
+                {
+                    _searchQuery = string.Empty;
+                    SearchTextBox.Text = string.Empty;
+                    RebuildCards();
+                    return System.Threading.Tasks.Task.CompletedTask;
+                }),
+            new(
+                "Pin Selected to Quick",
+                "Assign selected entry to Quick group",
+                "Context Menu",
+                "Edit",
+                () =>
+                {
+                    var selected = GetSelectedFilteredEntry();
+                    if (selected is null || selected.IsDeleted)
+                    {
+                        return System.Threading.Tasks.Task.CompletedTask;
+                    }
+
+                    var index = _entries.IndexOf(selected);
+                    if (index < 0)
+                    {
+                        return System.Threading.Tasks.Task.CompletedTask;
+                    }
+
+                    var next = CloneEntry(selected, pinnedGroupId: PinnedGroupQuick, overwritePinnedGroup: true);
+                    _entries[index] = next;
+                    RebuildCards();
+                    ScheduleHistorySave();
+                    ShowToast("Pinned to Quick");
+                    return System.Threading.Tasks.Task.CompletedTask;
+                }),
+            new(
+                "Pin Selected to Work",
+                "Assign selected entry to Work group",
+                "Context Menu",
+                "Edit",
+                () =>
+                {
+                    var selected = GetSelectedFilteredEntry();
+                    if (selected is null || selected.IsDeleted)
+                    {
+                        return System.Threading.Tasks.Task.CompletedTask;
+                    }
+
+                    var index = _entries.IndexOf(selected);
+                    if (index < 0)
+                    {
+                        return System.Threading.Tasks.Task.CompletedTask;
+                    }
+
+                    var next = CloneEntry(selected, pinnedGroupId: PinnedGroupWork, overwritePinnedGroup: true);
+                    _entries[index] = next;
+                    RebuildCards();
+                    ScheduleHistorySave();
+                    ShowToast("Pinned to Work");
+                    return System.Threading.Tasks.Task.CompletedTask;
+                }),
+            new(
+                "Pin Selected to Idea",
+                "Assign selected entry to Idea group",
+                "Context Menu",
+                "Edit",
+                () =>
+                {
+                    var selected = GetSelectedFilteredEntry();
+                    if (selected is null || selected.IsDeleted)
+                    {
+                        return System.Threading.Tasks.Task.CompletedTask;
+                    }
+
+                    var index = _entries.IndexOf(selected);
+                    if (index < 0)
+                    {
+                        return System.Threading.Tasks.Task.CompletedTask;
+                    }
+
+                    var next = CloneEntry(selected, pinnedGroupId: PinnedGroupIdea, overwritePinnedGroup: true);
+                    _entries[index] = next;
+                    RebuildCards();
+                    ScheduleHistorySave();
+                    ShowToast("Pinned to Idea");
+                    return System.Threading.Tasks.Task.CompletedTask;
+                }),
+            new(
+                "Unpin Selected",
+                "Remove selected entry from pinned groups",
+                "Context Menu",
+                "Edit",
+                () =>
+                {
+                    var selected = GetSelectedFilteredEntry();
+                    if (selected is null || selected.IsDeleted)
+                    {
+                        return System.Threading.Tasks.Task.CompletedTask;
+                    }
+
+                    var index = _entries.IndexOf(selected);
+                    if (index < 0)
+                    {
+                        return System.Threading.Tasks.Task.CompletedTask;
+                    }
+
+                    var next = CloneEntry(selected, pinnedGroupId: null, overwritePinnedGroup: true);
+                    _entries[index] = next;
+                    RebuildCards();
+                    ScheduleHistorySave();
+                    ShowToast("Unpinned");
+                    return System.Threading.Tasks.Task.CompletedTask;
+                }),
+            new(
+                "Delete Selected",
+                _isTrashView ? "Delete selected entry permanently" : "Move selected entry to trash",
+                "Context Menu / Del",
+                "Edit",
+                () =>
+                {
+                    var selected = GetSelectedFilteredEntry();
+                    if (selected is not null)
+                    {
+                        DeleteEntry(selected);
+                    }
+
+                    return System.Threading.Tasks.Task.CompletedTask;
+                },
+                CommandPaletteSeverity.Warning),
+            new(
+                "Restore Selected (Trash)",
+                "Restore selected entry when trash view is active",
+                "Context Menu",
+                "Edit",
+                () =>
+                {
+                    if (!_isTrashView)
+                    {
+                        return System.Threading.Tasks.Task.CompletedTask;
+                    }
+
+                    var selected = GetSelectedFilteredEntry();
+                    if (selected is not null)
+                    {
+                        RestoreEntryFromTrash(selected);
+                    }
+
+                    return System.Threading.Tasks.Task.CompletedTask;
+                }),
+            new(
+                "Show Keyboard Help",
+                "Show main shortcuts and modes",
+                "Ctrl+K",
+                "Help",
+                async () =>
+                {
+                    var help = new ContentDialog
+                    {
+                        Title = "Keyboard Shortcuts",
+                        Content = new TextBlock
+                        {
+                            Text = "Ctrl+Alt+V: Toggle overlay\nCtrl+F: Search\nCtrl+T: Trash view\nAlt+Enter: Plain paste (one-time)\nCtrl+Shift+V: Toggle paste mode\nCtrl+Z: Undo delete\nEnter: Paste selected\nEsc: Close/Back",
+                            TextWrapping = TextWrapping.WrapWholeWords
+                        },
+                        CloseButtonText = "Close",
+                        XamlRoot = Root.XamlRoot
+                    };
+                    await help.ShowAsync();
+                })
+        };
+    }
+
+    private ClipboardEntry? GetSelectedFilteredEntry()
+    {
+        if (_selectedCardIndex < 0 || _selectedCardIndex >= _filteredEntries.Count)
+        {
+            return null;
+        }
+
+        return _filteredEntries[_selectedCardIndex];
+    }
+
+    private sealed class CommandPaletteActionItem
+    {
+        public CommandPaletteActionItem(
+            string title,
+            string description,
+            string shortcut,
+            string category,
+            Func<System.Threading.Tasks.Task> executeAsync,
+            CommandPaletteSeverity severity = CommandPaletteSeverity.Normal)
+        {
+            Title = title;
+            Description = description;
+            Shortcut = shortcut;
+            Category = category;
+            ExecuteAsync = executeAsync;
+            Severity = severity;
+        }
+
+        public string Title { get; }
+        public string Description { get; }
+        public string Shortcut { get; }
+        public string Category { get; }
+        public Func<System.Threading.Tasks.Task> ExecuteAsync { get; }
+        public CommandPaletteSeverity Severity { get; }
+    }
+
+    private enum CommandPaletteSeverity
+    {
+        Normal = 0,
+        Warning = 1
+    }
+
+    private static ClipboardEntry CloneEntry(
+        ClipboardEntry entry,
+        bool? isPinned = null,
+        string? pinnedGroupId = null,
+        bool overwritePinnedGroup = false,
+        bool? isDeleted = null,
+        DateTimeOffset? deletedAtUtc = null)
+    {
+        var resolvedPinnedGroupId = overwritePinnedGroup
+            ? NormalizePinnedGroupId(pinnedGroupId)
+            : (isPinned.HasValue
+                ? (isPinned.Value ? (entry.PinnedGroupId ?? PinnedGroupQuick) : null)
+                : entry.PinnedGroupId);
+
+        return new ClipboardEntry(
+            entry.Kind,
+            entry.SourceApp,
+            entry.Content,
+            entry.CopiedAtUtc,
+            entry.SourceExePath,
+            entry.SourceIconPngBytes,
+            entry.SourceHeaderColor,
+            entry.ImagePngBytes,
+            entry.ImageWidth,
+            entry.ImageHeight,
+            entry.LinkUrl,
+            entry.LinkTitle,
+            entry.LinkPreviewImageBytes,
+            entry.LinkFaviconImageBytes,
+            entry.LinkHost,
+            !string.IsNullOrWhiteSpace(resolvedPinnedGroupId),
+            isDeleted ?? entry.IsDeleted,
+            deletedAtUtc.HasValue ? deletedAtUtc : entry.DeletedAtUtc,
+            resolvedPinnedGroupId);
     }
 
     private void AddCardFromEntry(ClipboardEntry entry)
@@ -3505,7 +4901,9 @@ public sealed partial class MainWindow : Window
         };
         topBarContent.Children.Add(new TextBlock
         {
-            Text = entry.Kind,
+            Text = !string.IsNullOrWhiteSpace(entry.PinnedGroupId)
+                ? $"{GetPinnedGroupLabel(entry.PinnedGroupId)} · {entry.Kind}"
+                : entry.Kind,
             FontSize = headerKindFontSize,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             Foreground = new SolidColorBrush(Color.FromArgb(230, 255, 255, 255)),
@@ -4213,7 +5611,11 @@ public sealed partial class MainWindow : Window
             string? linkTitle = null,
             byte[]? linkPreviewImageBytes = null,
             byte[]? linkFaviconImageBytes = null,
-            string? linkHost = null)
+            string? linkHost = null,
+            bool isPinned = false,
+            bool isDeleted = false,
+            DateTimeOffset? deletedAtUtc = null,
+            string? pinnedGroupId = null)
         {
             Kind = kind;
             SourceApp = sourceApp;
@@ -4230,6 +5632,14 @@ public sealed partial class MainWindow : Window
             LinkPreviewImageBytes = linkPreviewImageBytes;
             LinkFaviconImageBytes = linkFaviconImageBytes;
             LinkHost = linkHost;
+            PinnedGroupId = NormalizePinnedGroupId(pinnedGroupId);
+            if (PinnedGroupId is null && isPinned)
+            {
+                PinnedGroupId = PinnedGroupQuick;
+            }
+            IsPinned = !string.IsNullOrWhiteSpace(PinnedGroupId);
+            IsDeleted = isDeleted;
+            DeletedAtUtc = deletedAtUtc;
         }
 
         public string Kind { get; }
@@ -4247,6 +5657,10 @@ public sealed partial class MainWindow : Window
         public byte[]? LinkPreviewImageBytes { get; }
         public byte[]? LinkFaviconImageBytes { get; }
         public string? LinkHost { get; }
+        public string? PinnedGroupId { get; }
+        public bool IsPinned { get; }
+        public bool IsDeleted { get; }
+        public DateTimeOffset? DeletedAtUtc { get; }
     }
 
     private sealed class PersistedClipboardEntry
@@ -4266,6 +5680,10 @@ public sealed partial class MainWindow : Window
         public byte[]? LinkPreviewImageBytes { get; set; }
         public byte[]? LinkFaviconImageBytes { get; set; }
         public string? LinkHost { get; set; }
+        public bool IsPinned { get; set; }
+        public string? PinnedGroupId { get; set; }
+        public bool IsDeleted { get; set; }
+        public DateTimeOffset? DeletedAtUtc { get; set; }
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]

@@ -18,7 +18,7 @@ try {
 
     $hooksDir = Join-Path $gitDirPath "hooks"
     $prePushHookPath = Join-Path $hooksDir "pre-push"
-    $hookScriptPath = Join-Path $repoRoot "scripts/hooks/pre-push.ps1"
+    $hookScriptPath = Join-Path $repoRoot "tools/scripts/hooks/pre-push.ps1"
 
     if (-not (Test-Path $hookScriptPath)) {
         throw "Hook script not found: $hookScriptPath"

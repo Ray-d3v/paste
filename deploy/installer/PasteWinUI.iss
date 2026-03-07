@@ -4,7 +4,7 @@
 #endif
 #define MyAppPublisher "PasteWinUI"
 #define MyAppExeName "PasteWinUI.exe"
-#define MyPublishDir "..\\PasteWinUI\\bin\\x64\\Release\\net8.0-windows10.0.19041.0\\win-x64\\publish"
+#define MyPublishDir "..\\..\\src\\PasteWinUI\\bin\\x64\\Release\\net8.0-windows10.0.19041.0\\win-x64\\publish"
 
 [Setup]
 AppId={{C2D6E802-73E5-4DD7-8D5D-A4DF9EF0C4F3}

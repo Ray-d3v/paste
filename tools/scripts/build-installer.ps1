@@ -29,9 +29,9 @@ function Resolve-IsccPath {
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$projectPath = Join-Path $repoRoot "PasteWinUI\PasteWinUI.csproj"
-$issPath = Join-Path $repoRoot "installer\PasteWinUI.iss"
-$publishDir = Join-Path $repoRoot "PasteWinUI\bin\x64\$Configuration\net8.0-windows10.0.19041.0\$Runtime\publish"
+$projectPath = Join-Path $repoRoot "src\PasteWinUI\PasteWinUI.csproj"
+$issPath = Join-Path $repoRoot "deploy\installer\PasteWinUI.iss"
+$publishDir = Join-Path $repoRoot "src\PasteWinUI\bin\x64\$Configuration\net8.0-windows10.0.19041.0\$Runtime\publish"
 $publishExe = Join-Path $publishDir "PasteWinUI.exe"
 
 if (-not $SkipPublish) {
@@ -52,6 +52,6 @@ if ($LASTEXITCODE -ne 0) {
     throw "ISCC failed. ExitCode=$LASTEXITCODE"
 }
 
-$installerPath = Join-Path $repoRoot "installer\output\PasteWinUI-Setup-$Version.exe"
+$installerPath = Join-Path $repoRoot "deploy\installer\output\PasteWinUI-Setup-$Version.exe"
 Write-Host "Installer build completed."
 Write-Host "Output: $installerPath"

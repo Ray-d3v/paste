@@ -9,7 +9,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$projectPath = Join-Path $repoRoot "PasteWinUI/PasteWinUI.csproj"
+$projectPath = Join-Path $repoRoot "src/PasteWinUI/PasteWinUI.csproj"
 $publishDir = Join-Path $repoRoot $OutDir
 $exePath = Join-Path $publishDir "PasteWinUI.exe"
 
@@ -21,7 +21,7 @@ Write-Host "Stopping existing PasteWinUI processes..."
 Get-Process -Name "PasteWinUI" -ErrorAction SilentlyContinue | Stop-Process -Force
 
 $dotnetCandidates = Get-CimInstance Win32_Process -Filter "Name = 'dotnet.exe'" |
-    Where-Object { $_.CommandLine -match "PasteWinUI[\\/]+PasteWinUI\.csproj" }
+    Where-Object { $_.CommandLine -match "src[\\/]+PasteWinUI[\\/]+PasteWinUI\.csproj" }
 
 foreach ($proc in $dotnetCandidates) {
     try {

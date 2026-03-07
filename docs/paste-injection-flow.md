@@ -1,7 +1,7 @@
 # Paste Injection Flow (Current Working Behavior)
 
 This document records the exact paste behavior that is currently working.
-Code reference: `PasteWinUI/MainWindow.xaml.cs`.
+Code reference: `src/PasteWinUI/MainWindow.xaml.cs`.
 
 ## Trigger
 
