@@ -8,7 +8,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$repoRoot = Split-Path -Parent $PSScriptRoot
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $projectPath = Join-Path $repoRoot "src/PasteWinUI/PasteWinUI.csproj"
 $publishDir = Join-Path $repoRoot $OutDir
 $exePath = Join-Path $publishDir "PasteWinUI.exe"

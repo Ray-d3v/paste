@@ -23,7 +23,10 @@ jobs:
           global-json-file: global.json
 
       - name: Restore
-        run: dotnet restore src/PasteWinUI/PasteWinUI.csproj
+        run: dotnet restore paste.sln
+
+      - name: Run tests
+        run: dotnet test paste.sln -c Release --no-restore
 
       - name: Publish EXE (win-x64)
         shell: pwsh

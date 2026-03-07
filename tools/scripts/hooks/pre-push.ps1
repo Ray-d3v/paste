@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 
 $hooksDir = Split-Path -Parent $PSCommandPath
 $scriptsDir = Split-Path -Parent $hooksDir
-$repoRoot = Split-Path -Parent $scriptsDir
+$repoRoot = Split-Path -Parent (Split-Path -Parent $scriptsDir)
 $buildScript = Join-Path $scriptsDir "build-local-exe.ps1"
 
 if (-not (Test-Path $buildScript)) {
@@ -13,6 +13,13 @@ if (-not (Test-Path $buildScript)) {
 
 Push-Location $repoRoot
 try {
+    Write-Host "[pre-push] Running tests..."
+    dotnet test paste.sln -c Release
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "[pre-push] Test execution failed."
+        exit 1
+    }
+
     Write-Host "[pre-push] Building local EXE for verification..."
     & powershell -ExecutionPolicy Bypass -File $buildScript -NoLaunch
     if ($LASTEXITCODE -ne 0) {

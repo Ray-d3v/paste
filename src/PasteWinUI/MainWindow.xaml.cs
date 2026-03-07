@@ -25,6 +25,8 @@ using Windows.Graphics.Imaging;
 using Windows.Storage;
 using Windows.Storage.Streams;
 using Windows.UI;
+using ClipboardEntry = PasteWinUI.ClipboardEntryModel;
+using PersistedClipboardEntry = PasteWinUI.PersistedClipboardEntryModel;
 
 namespace PasteWinUI;
 
@@ -1081,43 +1083,11 @@ public sealed partial class MainWindow : Window
         return Color.FromArgb(a, r, g, b);
     }
 
-    private static string? NormalizePinnedGroupId(string? groupId)
-    {
-        if (string.IsNullOrWhiteSpace(groupId))
-        {
-            return null;
-        }
+    private static string? NormalizePinnedGroupId(string? groupId) => PinnedGroupCatalog.Normalize(groupId);
 
-        return groupId.Trim().ToLowerInvariant() switch
-        {
-            PinnedGroupQuick => PinnedGroupQuick,
-            PinnedGroupWork => PinnedGroupWork,
-            PinnedGroupIdea => PinnedGroupIdea,
-            _ => null
-        };
-    }
+    private static string GetPinnedGroupLabel(string? groupId) => PinnedGroupCatalog.GetLabel(groupId);
 
-    private static string GetPinnedGroupLabel(string? groupId)
-    {
-        return NormalizePinnedGroupId(groupId) switch
-        {
-            PinnedGroupQuick => "Quick",
-            PinnedGroupWork => "Work",
-            PinnedGroupIdea => "Idea",
-            _ => "All"
-        };
-    }
-
-    private static Color GetPinnedGroupColor(string? groupId)
-    {
-        return NormalizePinnedGroupId(groupId) switch
-        {
-            PinnedGroupQuick => Color.FromArgb(255, 245, 158, 11),
-            PinnedGroupWork => Color.FromArgb(255, 34, 197, 94),
-            PinnedGroupIdea => Color.FromArgb(255, 96, 165, 250),
-            _ => Color.FromArgb(255, 138, 160, 175)
-        };
-    }
+    private static Color GetPinnedGroupColor(string? groupId) => PinnedGroupCatalog.GetColor(groupId);
 
     private void UpdatePinnedGroupFilterButtons()
     {
@@ -1349,120 +1319,14 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private static bool IsLikelyDuplicateClipboardEntry(ClipboardEntry existing, ClipboardEntry incoming)
-    {
-        var timeDiff = (incoming.CopiedAtUtc - existing.CopiedAtUtc).Duration();
-        if (timeDiff > TimeSpan.FromSeconds(DuplicateMergeWindowSeconds))
-        {
-            return false;
-        }
+    private static bool IsLikelyDuplicateClipboardEntry(ClipboardEntry existing, ClipboardEntry incoming) =>
+        ClipboardHistoryLogic.IsLikelyDuplicateClipboardEntry(
+            existing,
+            incoming,
+            TimeSpan.FromSeconds(DuplicateMergeWindowSeconds));
 
-        if (!string.Equals(existing.Kind, incoming.Kind, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        if (string.Equals(incoming.Kind, "Link", StringComparison.Ordinal))
-        {
-            var left = NormalizeLinkForComparison(existing.LinkUrl ?? existing.Content);
-            var right = NormalizeLinkForComparison(incoming.LinkUrl ?? incoming.Content);
-            return string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
-        }
-
-        if (string.Equals(incoming.Kind, "Image", StringComparison.Ordinal))
-        {
-            return existing.ImageWidth == incoming.ImageWidth &&
-                   existing.ImageHeight == incoming.ImageHeight &&
-                   existing.ImagePngBytes is { Length: > 0 } &&
-                   incoming.ImagePngBytes is { Length: > 0 };
-        }
-
-        return string.Equals(existing.Content, incoming.Content, StringComparison.Ordinal);
-    }
-
-    private static ClipboardEntry MergeClipboardEntries(ClipboardEntry existing, ClipboardEntry incoming)
-    {
-        var content = ChoosePreferredContent(incoming.Content, existing.Content);
-        var sourceExePath = incoming.SourceExePath ?? existing.SourceExePath;
-        var sourceIconPngBytes = incoming.SourceIconPngBytes ?? existing.SourceIconPngBytes;
-        var sourceHeaderColor = incoming.SourceHeaderColor;
-        var imagePngBytes = incoming.ImagePngBytes ?? existing.ImagePngBytes;
-        var imageWidth = incoming.ImageWidth > 0 ? incoming.ImageWidth : existing.ImageWidth;
-        var imageHeight = incoming.ImageHeight > 0 ? incoming.ImageHeight : existing.ImageHeight;
-        var linkUrl = ChoosePreferredText(incoming.LinkUrl, existing.LinkUrl);
-        var linkTitle = ChoosePreferredText(incoming.LinkTitle, existing.LinkTitle);
-        var linkPreviewImageBytes = incoming.LinkPreviewImageBytes ?? existing.LinkPreviewImageBytes;
-        var linkFaviconImageBytes = incoming.LinkFaviconImageBytes ?? existing.LinkFaviconImageBytes;
-        var linkHost = ChoosePreferredText(incoming.LinkHost, existing.LinkHost);
-
-        return new ClipboardEntry(
-            incoming.Kind,
-            incoming.SourceApp,
-            content,
-            incoming.CopiedAtUtc > existing.CopiedAtUtc ? incoming.CopiedAtUtc : existing.CopiedAtUtc,
-            sourceExePath,
-            sourceIconPngBytes,
-            sourceHeaderColor,
-            imagePngBytes,
-            imageWidth,
-            imageHeight,
-            linkUrl,
-            linkTitle,
-            linkPreviewImageBytes,
-            linkFaviconImageBytes,
-            linkHost,
-            existing.IsPinned || incoming.IsPinned,
-            existing.IsDeleted || incoming.IsDeleted,
-            existing.DeletedAtUtc ?? incoming.DeletedAtUtc,
-            existing.PinnedGroupId ?? incoming.PinnedGroupId);
-    }
-
-    private static string ChoosePreferredContent(string preferred, string fallback)
-    {
-        if (string.IsNullOrWhiteSpace(preferred))
-        {
-            return fallback;
-        }
-
-        if (preferred is "[Link]" or "[Image copied]" && !string.IsNullOrWhiteSpace(fallback))
-        {
-            return fallback;
-        }
-
-        return preferred;
-    }
-
-    private static string? ChoosePreferredText(string? preferred, string? fallback)
-    {
-        return string.IsNullOrWhiteSpace(preferred) ? fallback : preferred;
-    }
-
-    private static string NormalizeLinkForComparison(string? rawLink)
-    {
-        if (string.IsNullOrWhiteSpace(rawLink))
-        {
-            return string.Empty;
-        }
-
-        var trimmed = rawLink.Trim();
-        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
-        {
-            return trimmed;
-        }
-
-        var builder = new UriBuilder(uri)
-        {
-            Fragment = string.Empty
-        };
-
-        if (builder.Path.Length > 1)
-        {
-            builder.Path = builder.Path.TrimEnd('/');
-        }
-
-        var normalized = builder.Uri.AbsoluteUri;
-        return normalized.Length > 1 ? normalized.TrimEnd('/') : normalized;
-    }
+    private static ClipboardEntry MergeClipboardEntries(ClipboardEntry existing, ClipboardEntry incoming) =>
+        ClipboardHistoryLogic.MergeClipboardEntries(existing, incoming);
 
     private static string FormatSourceAppName(string processName)
     {
@@ -2693,43 +2557,8 @@ public sealed partial class MainWindow : Window
         return result == ContentDialogResult.Primary;
     }
 
-    private static bool TryGetPasteRiskReason(ClipboardEntry entry, out string reason)
-    {
-        reason = string.Empty;
-        if (!string.Equals(entry.Kind, "Text", StringComparison.Ordinal) &&
-            !string.Equals(entry.Kind, "Link", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        var text = string.Equals(entry.Kind, "Link", StringComparison.Ordinal)
-            ? (string.IsNullOrWhiteSpace(entry.LinkUrl) ? entry.Content : entry.LinkUrl!)
-            : entry.Content;
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return false;
-        }
-
-        if (text.Length >= RiskPasteLengthThreshold)
-        {
-            reason = $"Large paste detected ({text.Length:N0} characters).";
-            return true;
-        }
-
-        if (text.Contains('\n'))
-        {
-            reason = "Multi-line content detected.";
-            return true;
-        }
-
-        if (EmailLikeRegex.IsMatch(text) || TokenLikeRegex.IsMatch(text))
-        {
-            reason = "Sensitive-looking content detected.";
-            return true;
-        }
-
-        return false;
-    }
+    private static bool TryGetPasteRiskReason(ClipboardEntry entry, out string reason) =>
+        PasteRiskEvaluator.TryGetPasteRiskReason(entry, RiskPasteLengthThreshold, out reason);
 
     private static async System.Threading.Tasks.Task<RandomAccessStreamReference?> CreateBitmapReferenceFromBytesAsync(byte[] pngBytes)
     {
@@ -3834,50 +3663,11 @@ public sealed partial class MainWindow : Window
     private void UpdateFilteredEntries()
     {
         _filteredEntries.Clear();
-
-        IEnumerable<ClipboardEntry> visibleEntries = _entries
-            .Where(entry => _isTrashView ? entry.IsDeleted : !entry.IsDeleted);
-
-        if (!string.IsNullOrWhiteSpace(_activePinnedGroupId))
-        {
-            visibleEntries = visibleEntries.Where(entry =>
-                string.Equals(entry.PinnedGroupId, _activePinnedGroupId, StringComparison.Ordinal));
-        }
-
-        var orderedEntries = string.IsNullOrWhiteSpace(_activePinnedGroupId)
-            ? visibleEntries
-                .OrderByDescending(entry => !string.IsNullOrWhiteSpace(entry.PinnedGroupId))
-                .ThenByDescending(entry => entry.CopiedAtUtc)
-            : visibleEntries.OrderByDescending(entry => entry.CopiedAtUtc);
-
-        if (string.IsNullOrWhiteSpace(_searchQuery))
-        {
-            _filteredEntries.AddRange(orderedEntries);
-            return;
-        }
-
-        foreach (var entry in orderedEntries)
-        {
-            if (EntryMatchesSearch(entry, _searchQuery))
-            {
-                _filteredEntries.Add(entry);
-            }
-        }
-    }
-
-    private static bool EntryMatchesSearch(ClipboardEntry entry, string query)
-    {
-        var comparison = StringComparison.OrdinalIgnoreCase;
-        if (entry.Kind.Contains(query, comparison) ||
-            entry.SourceApp.Contains(query, comparison) ||
-            entry.Content.Contains(query, comparison))
-        {
-            return true;
-        }
-
-        return (!string.IsNullOrWhiteSpace(entry.LinkTitle) && entry.LinkTitle.Contains(query, comparison)) ||
-            (!string.IsNullOrWhiteSpace(entry.LinkUrl) && entry.LinkUrl.Contains(query, comparison)) ||
-            (!string.IsNullOrWhiteSpace(entry.LinkHost) && entry.LinkHost.Contains(query, comparison));
+        _filteredEntries.AddRange(ClipboardHistoryLogic.GetVisibleEntries(
+            _entries,
+            _isTrashView,
+            _activePinnedGroupId,
+            _searchQuery));
     }
 
     private void RebuildCards()
@@ -4766,35 +4556,14 @@ public sealed partial class MainWindow : Window
         string? pinnedGroupId = null,
         bool overwritePinnedGroup = false,
         bool? isDeleted = null,
-        DateTimeOffset? deletedAtUtc = null)
-    {
-        var resolvedPinnedGroupId = overwritePinnedGroup
-            ? NormalizePinnedGroupId(pinnedGroupId)
-            : (isPinned.HasValue
-                ? (isPinned.Value ? (entry.PinnedGroupId ?? PinnedGroupQuick) : null)
-                : entry.PinnedGroupId);
-
-        return new ClipboardEntry(
-            entry.Kind,
-            entry.SourceApp,
-            entry.Content,
-            entry.CopiedAtUtc,
-            entry.SourceExePath,
-            entry.SourceIconPngBytes,
-            entry.SourceHeaderColor,
-            entry.ImagePngBytes,
-            entry.ImageWidth,
-            entry.ImageHeight,
-            entry.LinkUrl,
-            entry.LinkTitle,
-            entry.LinkPreviewImageBytes,
-            entry.LinkFaviconImageBytes,
-            entry.LinkHost,
-            !string.IsNullOrWhiteSpace(resolvedPinnedGroupId),
-            isDeleted ?? entry.IsDeleted,
-            deletedAtUtc.HasValue ? deletedAtUtc : entry.DeletedAtUtc,
-            resolvedPinnedGroupId);
-    }
+        DateTimeOffset? deletedAtUtc = null) =>
+        ClipboardHistoryLogic.CloneEntry(
+            entry,
+            isPinned,
+            pinnedGroupId,
+            overwritePinnedGroup,
+            isDeleted,
+            deletedAtUtc);
 
     private void AddCardFromEntry(ClipboardEntry entry)
     {
@@ -5592,98 +5361,6 @@ public sealed partial class MainWindow : Window
             host.Width = cardSize;
             host.Height = cardSize;
         }
-    }
-
-    private sealed class ClipboardEntry
-    {
-        public ClipboardEntry(
-            string kind,
-            string sourceApp,
-            string content,
-            DateTimeOffset copiedAtUtc,
-            string? sourceExePath,
-            byte[]? sourceIconPngBytes,
-            Color sourceHeaderColor,
-            byte[]? imagePngBytes = null,
-            int imageWidth = 0,
-            int imageHeight = 0,
-            string? linkUrl = null,
-            string? linkTitle = null,
-            byte[]? linkPreviewImageBytes = null,
-            byte[]? linkFaviconImageBytes = null,
-            string? linkHost = null,
-            bool isPinned = false,
-            bool isDeleted = false,
-            DateTimeOffset? deletedAtUtc = null,
-            string? pinnedGroupId = null)
-        {
-            Kind = kind;
-            SourceApp = sourceApp;
-            Content = content;
-            CopiedAtUtc = copiedAtUtc;
-            SourceExePath = sourceExePath;
-            SourceIconPngBytes = sourceIconPngBytes;
-            SourceHeaderColor = sourceHeaderColor;
-            ImagePngBytes = imagePngBytes;
-            ImageWidth = imageWidth;
-            ImageHeight = imageHeight;
-            LinkUrl = linkUrl;
-            LinkTitle = linkTitle;
-            LinkPreviewImageBytes = linkPreviewImageBytes;
-            LinkFaviconImageBytes = linkFaviconImageBytes;
-            LinkHost = linkHost;
-            PinnedGroupId = NormalizePinnedGroupId(pinnedGroupId);
-            if (PinnedGroupId is null && isPinned)
-            {
-                PinnedGroupId = PinnedGroupQuick;
-            }
-            IsPinned = !string.IsNullOrWhiteSpace(PinnedGroupId);
-            IsDeleted = isDeleted;
-            DeletedAtUtc = deletedAtUtc;
-        }
-
-        public string Kind { get; }
-        public string SourceApp { get; }
-        public string Content { get; }
-        public DateTimeOffset CopiedAtUtc { get; }
-        public string? SourceExePath { get; }
-        public byte[]? SourceIconPngBytes { get; }
-        public Color SourceHeaderColor { get; }
-        public byte[]? ImagePngBytes { get; }
-        public int ImageWidth { get; }
-        public int ImageHeight { get; }
-        public string? LinkUrl { get; }
-        public string? LinkTitle { get; }
-        public byte[]? LinkPreviewImageBytes { get; }
-        public byte[]? LinkFaviconImageBytes { get; }
-        public string? LinkHost { get; }
-        public string? PinnedGroupId { get; }
-        public bool IsPinned { get; }
-        public bool IsDeleted { get; }
-        public DateTimeOffset? DeletedAtUtc { get; }
-    }
-
-    private sealed class PersistedClipboardEntry
-    {
-        public string? Kind { get; set; }
-        public string? SourceApp { get; set; }
-        public string? Content { get; set; }
-        public DateTimeOffset CopiedAtUtc { get; set; }
-        public string? SourceExePath { get; set; }
-        public byte[]? SourceIconPngBytes { get; set; }
-        public uint SourceHeaderColorArgb { get; set; }
-        public byte[]? ImagePngBytes { get; set; }
-        public int ImageWidth { get; set; }
-        public int ImageHeight { get; set; }
-        public string? LinkUrl { get; set; }
-        public string? LinkTitle { get; set; }
-        public byte[]? LinkPreviewImageBytes { get; set; }
-        public byte[]? LinkFaviconImageBytes { get; set; }
-        public string? LinkHost { get; set; }
-        public bool IsPinned { get; set; }
-        public string? PinnedGroupId { get; set; }
-        public bool IsDeleted { get; set; }
-        public DateTimeOffset? DeletedAtUtc { get; set; }
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]

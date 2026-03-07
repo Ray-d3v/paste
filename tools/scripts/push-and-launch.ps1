@@ -6,7 +6,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$repoRoot = Split-Path -Parent $PSScriptRoot
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $buildScript = Join-Path $PSScriptRoot "build-local-exe.ps1"
 $exePath = Join-Path $repoRoot "artifacts/local/publish/PasteWinUI.exe"
 

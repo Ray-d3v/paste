@@ -54,4 +54,8 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.5.240802000" />
     <PackageReference Include="System.Drawing.Common" Version="8.0.12" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PasteWinUI.Core\PasteWinUI.Core.csproj" />
+  </ItemGroup>
 </Project>
