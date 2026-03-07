@@ -297,8 +297,8 @@
                 x:Name="EmptyStatePanel"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Center"
-                Width="520"
-                MaxWidth="90%"
+                MinWidth="320"
+                MaxWidth="520"
                 Padding="18,14"
                 CornerRadius="14"
                 Visibility="Collapsed"
@@ -306,18 +306,25 @@
                 BorderBrush="#FF394651"
                 BorderThickness="1"
                 IsHitTestVisible="False">
-                <StackPanel Spacing="6">
+                <StackPanel
+                    Width="Auto"
+                    MaxWidth="420"
+                    HorizontalAlignment="Stretch"
+                    Spacing="6">
                     <TextBlock
                         x:Name="EmptyStateTitleText"
                         Text="No clipboard items yet"
                         FontSize="15"
                         FontWeight="SemiBold"
-                        Foreground="#FFF3F4F1" />
+                        Foreground="#FFF3F4F1"
+                        TextAlignment="Center"
+                        TextWrapping="WrapWholeWords" />
                     <TextBlock
                         x:Name="EmptyStateBodyText"
                         Text="Copy something and open with Ctrl+Alt+V. Use Ctrl+F to search."
                         FontSize="12.5"
                         Foreground="#FFB5BEC6"
+                        TextAlignment="Center"
                         TextWrapping="WrapWholeWords" />
                 </StackPanel>
             </Border>

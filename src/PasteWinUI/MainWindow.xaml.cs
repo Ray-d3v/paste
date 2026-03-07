@@ -3835,6 +3835,20 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        if (!string.IsNullOrWhiteSpace(_searchQuery))
+        {
+            EmptyStateTitleText.Text = "No matches found";
+            EmptyStateBodyText.Text = "Try a different search term or clear the current query.";
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_activePinnedGroupId))
+        {
+            EmptyStateTitleText.Text = $"{GetPinnedGroupLabel(_activePinnedGroupId)} is empty";
+            EmptyStateBodyText.Text = "Pinned items for this group will appear here.";
+            return;
+        }
+
         EmptyStateTitleText.Text = "Clipboard history is empty";
         EmptyStateBodyText.Text = "Copy something and open with Ctrl+Alt+V. Shortcuts: Ctrl+F Search, Ctrl+T Trash, Alt+Enter Plain Paste.";
     }
