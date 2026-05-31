@@ -2,9 +2,12 @@
 .dotnet/
 .vs/
 artifacts/
+deploy/installer/iexpress-work/
+deploy/installer/output/
 
 **/bin/
 **/obj/
+**/target/
 
 *.user
 *.suo

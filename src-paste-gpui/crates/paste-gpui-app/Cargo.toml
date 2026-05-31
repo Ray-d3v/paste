@@ -1,0 +1,18 @@
+[package]
+name = "paste-gpui-app"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "PasteWinUI"
+path = "src/main.rs"
+
+[dependencies]
+gpui = { git = "https://github.com/zed-industries/zed" }
+gpui-platform = { git = "https://github.com/zed-industries/zed", package = "gpui_platform" }
+paste-core = { path = "../paste-core" }
+paste-windows-platform = { path = "../paste-windows-platform" }
+time = "0.3"
+url = "2"

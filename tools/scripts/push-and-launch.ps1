@@ -8,7 +8,7 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $buildScript = Join-Path $PSScriptRoot "build-local-exe.ps1"
-$exePath = Join-Path $repoRoot "artifacts/local/publish/PasteWinUI.exe"
+$exePath = Join-Path $repoRoot "artifacts/local-gpui/PasteWinUI.exe"
 
 Push-Location $repoRoot
 try {

@@ -1,36 +1,42 @@
 # Repository Guidelines
 
 ## Product Goal
-Implement a Paste (mac)-like clipboard UI using **C# / WinUI 3**.
+Implement a Paste (mac)-like clipboard UI using **Rust / GPUI**.
 - The UI is toggled by global hotkey `Ctrl+Alt+V`.
 - It should slide up from the bottom of the screen when shown.
 - The experience should feel lightweight, fast, and keyboard-first.
 
 ## Project Structure & Module Organization
-Current implementation lives in `src/PasteWinUI/`.
-- `src/PasteWinUI/App.xaml` and `src/PasteWinUI/App.xaml.cs`: app startup and lifecycle.
-- `src/PasteWinUI/MainWindow.xaml` and `src/PasteWinUI/MainWindow.xaml.cs`: overlay UI and interaction behavior.
-- `src/PasteWinUI/PasteWinUI.csproj`: project configuration (`net8.0-windows`, WinUI 3 / Windows App SDK).
-- Build outputs are generated under `src/PasteWinUI/bin/` and `src/PasteWinUI/obj/` (do not edit or commit generated files).
+Current Rust implementation lives in `src-paste-gpui/`.
+- `crates/paste-core/`: clipboard history model, search, duplicate detection, retention, paste risk logic.
+- `crates/paste-windows-platform/`: Win32 hotkey, clipboard, paste injection, tray integration.
+- `crates/paste-gpui-app/`: GPUI overlay and application state.
+- Legacy WinUI comparison implementation remains in `src/PasteWinUI/` during migration.
 
 If tests are added, place them in a top-level `Tests/` folder (example: `Tests/PasteWinUI.Tests/`).
 
 ## Build, Test, and Development Commands
 Run commands from repository root:
-- `dotnet restore src/PasteWinUI/PasteWinUI.csproj` - restore NuGet dependencies.
-- `dotnet build src/PasteWinUI/PasteWinUI.csproj -c Release` - compile and validate the app.
-- `powershell -ExecutionPolicy Bypass -File tools/scripts/build-local-exe.ps1` - stop running instances, publish local EXE, and launch it for immediate local verification.
+- `cargo test --manifest-path src-paste-gpui/Cargo.toml --workspace` - run Rust unit tests.
+- `cargo check --manifest-path src-paste-gpui/Cargo.toml -p paste-gpui-app` - compile-check the GPUI app.
+- `powershell -ExecutionPolicy Bypass -File tools/scripts/build-local-exe.ps1` - stop running instances, build Rust local EXE, and launch it for immediate local verification.
+- `powershell -ExecutionPolicy Bypass -File tools/scripts/build-local-winui-exe.ps1 -NoLaunch` - optional legacy WinUI comparison build.
+- `powershell -ExecutionPolicy Bypass -File tools/scripts/measure-local-exe.ps1` - sample local EXE size and working set metrics.
+- `powershell -ExecutionPolicy Bypass -File tools/scripts/verify-gpui-release.ps1` - run release build, Rust tests, all GPUI smoke checks, and offline installer generation sequentially.
+- `powershell -ExecutionPolicy Bypass -File tools/scripts/smoke-gpui-hotkey.ps1` - launch Rust EXE and dispatch a `Ctrl+Alt+V` smoke hotkey.
+- `powershell -ExecutionPolicy Bypass -File tools/scripts/smoke-gpui-paste-text.ps1` - launch Rust EXE plus a temporary text target and verify `Ctrl+Alt+V` -> `Enter` text paste.
+- `powershell -ExecutionPolicy Bypass -File tools/scripts/smoke-gpui-paste-link.ps1` - launch Rust EXE plus a temporary text target and verify URL capture as a persisted `Link` item.
+- `powershell -ExecutionPolicy Bypass -File tools/scripts/smoke-gpui-paste-image.ps1` - launch Rust EXE plus a temporary image target and verify image capture/paste through CF_DIB.
+- `powershell -ExecutionPolicy Bypass -File tools/scripts/smoke-gpui-tray.ps1` - launch Rust EXE and verify tray Show/Exit command handling through the Win32 message loop.
+- `powershell -ExecutionPolicy Bypass -File tools/scripts/smoke-gpui-tray-restart.ps1` - launch Rust EXE and verify tray Restart relaunches into a replacement process.
 - `powershell -ExecutionPolicy Bypass -File tools/scripts/install-git-hooks.ps1` - install local git hooks (`pre-push`) to block push when EXE verification fails.
 - `powershell -ExecutionPolicy Bypass -File tools/scripts/push-and-launch.ps1 <git-push-args>` - run `git push`; on success, auto-launch EXE only for `main` and `release/*`.
-- `dotnet test` - run tests when test projects are present.
+- `dotnet test` - run legacy .NET tests when test projects are present.
 
-If the app is currently running and output files are locked, either stop the process or build to a separate output directory:
-- `dotnet build src/PasteWinUI/PasteWinUI.csproj -c Release -p:OutDir=../../artifacts/verify/`
-- `OutDir` must be outside `src/PasteWinUI/` (for example `../../artifacts/...` to target repository-root `artifacts/`, not `src/PasteWinUI/artifacts/...`).
-- Rationale: output under `src/PasteWinUI/artifacts` can be picked up recursively by MSBuild item discovery and cause later build/run failures (`MSB3030` path recursion issues).
+Rust build outputs are generated under `artifacts/cargo-target/` and copied to `artifacts/local-gpui/`.
 
 After any code fix, always restart the app before validating behavior:
-- Stop existing processes (`PasteWinUI.exe` and `dotnet` process hosting this project).
+- Stop existing `PasteWinUI.exe` processes.
 - Start again with `powershell -ExecutionPolicy Bypass -File tools/scripts/build-local-exe.ps1`.
 - Do not report UI behavior as fixed until after restart.
 - For local immediate checks, validate with the published EXE generated by the script above.
@@ -47,10 +53,9 @@ Push-success auto-launch flow:
 - On other branches, push still runs but EXE launch is skipped.
 
 ## Coding Style & Naming Conventions
-- Use 4-space indentation for C# and XAML.
-- Keep nullable reference types enabled; avoid suppressing warnings without reason.
-- C# naming: `PascalCase` for types/methods/properties, `camelCase` for locals/fields (private fields may use `_camelCase`).
-- Keep UI logic in `MainWindow.xaml.cs`; keep startup/system integration in `App.xaml.cs`.
+- Use 4-space indentation for Rust and PowerShell.
+- Keep Rust modules split by responsibility: core logic in `paste-core`, Win32 integration in `paste-windows-platform`, GPUI state/rendering in `paste-gpui-app`.
+- Rust naming follows standard conventions: `PascalCase` for types, `snake_case` for functions, methods, modules, and locals.
 - Prefer small methods with clear responsibilities and minimal side effects.
 
 ## Testing Guidelines

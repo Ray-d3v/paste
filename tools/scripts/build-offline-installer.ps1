@@ -1,16 +1,15 @@
 param(
-    [string]$Configuration = "Release",
-    [string]$Runtime = "win-x64",
+    [string]$Profile = "release",
     [string]$Version = "0.1.0",
-    [switch]$SkipPublish
+    [switch]$SkipBuild
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$projectPath = Join-Path $repoRoot "src\PasteWinUI\PasteWinUI.csproj"
-$publishDir = Join-Path $repoRoot "src\PasteWinUI\bin\x64\$Configuration\net8.0-windows10.0.19041.0\$Runtime\publish"
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$buildScript = Join-Path $repoRoot "tools\scripts\build-local-exe.ps1"
+$publishDir = Join-Path $repoRoot "artifacts\local-gpui"
 $publishExe = Join-Path $publishDir "PasteWinUI.exe"
 $workDir = Join-Path $repoRoot "deploy\installer\iexpress-work"
 $outputDir = Join-Path $repoRoot "deploy\installer\output"
@@ -20,9 +19,12 @@ $payloadZip = Join-Path $workDir "payload.zip"
 $installCmd = Join-Path $workDir "install.cmd"
 $installPs1 = Join-Path $workDir "install.ps1"
 
-if (-not $SkipPublish) {
-    Write-Host "Publishing $projectPath ..."
-    dotnet publish $projectPath -c $Configuration -r $Runtime --self-contained true /p:WindowsAppSDKSelfContained=true
+if (-not $SkipBuild) {
+    Write-Host "Building Rust GPUI EXE ..."
+    & powershell -ExecutionPolicy Bypass -File $buildScript -NoLaunch -Profile $Profile
+    if ($LASTEXITCODE -ne 0) {
+        throw "Rust GPUI EXE build failed. ExitCode=$LASTEXITCODE"
+    }
 }
 
 if (-not (Test-Path $publishExe)) {
@@ -52,13 +54,14 @@ $ErrorActionPreference = "Stop"
 $appName = "PasteWinUI"
 $appVersion = "__APP_VERSION__"
 $publisher = "PasteWinUI"
-$targetDir = Join-Path $env:LOCALAPPDATA "Programs\PasteWinUI"
-$startMenuDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\PasteWinUI"
+$targetDir = if ([string]::IsNullOrWhiteSpace($env:PASTEWINUI_INSTALL_DIR)) { Join-Path $env:LOCALAPPDATA "Programs\PasteWinUI" } else { $env:PASTEWINUI_INSTALL_DIR }
+$startMenuDir = if ([string]::IsNullOrWhiteSpace($env:PASTEWINUI_START_MENU_DIR)) { Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\PasteWinUI" } else { $env:PASTEWINUI_START_MENU_DIR }
 $payloadZip = Join-Path $PSScriptRoot "payload.zip"
-$desktopShortcutPath = Join-Path ([Environment]::GetFolderPath("Desktop")) "PasteWinUI.lnk"
+$desktopShortcutPath = if ([string]::IsNullOrWhiteSpace($env:PASTEWINUI_DESKTOP_SHORTCUT_PATH)) { Join-Path ([Environment]::GetFolderPath("Desktop")) "PasteWinUI.lnk" } else { $env:PASTEWINUI_DESKTOP_SHORTCUT_PATH }
 $runKeyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-$runValueName = "PasteWinUI"
-$uninstallKeyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PasteWinUI"
+$runValueName = if ([string]::IsNullOrWhiteSpace($env:PASTEWINUI_RUN_VALUE_NAME)) { "PasteWinUI" } else { $env:PASTEWINUI_RUN_VALUE_NAME }
+$uninstallKeyName = if ([string]::IsNullOrWhiteSpace($env:PASTEWINUI_UNINSTALL_KEY_NAME)) { "PasteWinUI" } else { $env:PASTEWINUI_UNINSTALL_KEY_NAME }
+$uninstallKeyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$uninstallKeyName"
 $exePath = Join-Path $targetDir "PasteWinUI.exe"
 
 function New-AppShortcut {
@@ -80,8 +83,26 @@ function New-AppShortcut {
 function Ask-YesNo {
     param(
         [Parameter(Mandatory = $true)][string]$Prompt,
-        [bool]$DefaultYes = $true
+        [bool]$DefaultYes = $true,
+        [string]$EnvName = ""
     )
+
+    if (-not [string]::IsNullOrWhiteSpace($EnvName)) {
+        $envValue = [Environment]::GetEnvironmentVariable($EnvName, "Process")
+        if (-not [string]::IsNullOrWhiteSpace($envValue)) {
+            switch ($envValue.Trim().ToLowerInvariant()) {
+                "1" { return $true }
+                "true" { return $true }
+                "yes" { return $true }
+                "y" { return $true }
+                "0" { return $false }
+                "false" { return $false }
+                "no" { return $false }
+                "n" { return $false }
+                default { throw "Invalid boolean value for ${EnvName}: $envValue" }
+            }
+        }
+    }
 
     while ($true) {
         if ($DefaultYes) {
@@ -110,12 +131,12 @@ New-Item -ItemType Directory -Path $startMenuDir -Force | Out-Null
 $startMenuShortcut = Join-Path $startMenuDir "PasteWinUI.lnk"
 New-AppShortcut -ShortcutPath $startMenuShortcut -TargetPath $exePath
 
-$createDesktopShortcut = Ask-YesNo -Prompt "Create desktop shortcut?" -DefaultYes $true
+$createDesktopShortcut = Ask-YesNo -Prompt "Create desktop shortcut?" -DefaultYes $true -EnvName "PASTEWINUI_CREATE_DESKTOP_SHORTCUT"
 if ($createDesktopShortcut) {
     New-AppShortcut -ShortcutPath $desktopShortcutPath -TargetPath $exePath
 }
 
-$enableAutoStart = Ask-YesNo -Prompt "Enable auto start at login?" -DefaultYes $false
+$enableAutoStart = Ask-YesNo -Prompt "Enable auto start at login?" -DefaultYes $false -EnvName "PASTEWINUI_ENABLE_AUTOSTART"
 if ($enableAutoStart) {
     New-Item -Path $runKeyPath -Force | Out-Null
     New-ItemProperty -Path $runKeyPath -Name $runValueName -Value ('"{0}"' -f $exePath) -PropertyType String -Force | Out-Null
@@ -133,8 +154,8 @@ Set-StrictMode -Version Latest
 `$startMenuDir = "__START_MENU_DIR__"
 `$desktopShortcutPath = "__DESKTOP_SHORTCUT__"
 `$runKeyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-`$runValueName = "PasteWinUI"
-`$uninstallKeyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PasteWinUI"
+`$runValueName = "__RUN_VALUE_NAME__"
+`$uninstallKeyPath = "__UNINSTALL_KEY_PATH__"
 
 Get-Process PasteWinUI -ErrorAction SilentlyContinue | Stop-Process -Force
 Remove-ItemProperty -Path `$runKeyPath -Name `$runValueName -ErrorAction SilentlyContinue
@@ -149,6 +170,8 @@ Start-Process -FilePath "cmd.exe" -ArgumentList "/c `$cmd" -WindowStyle Hidden
 $uninstallScript = $uninstallScript.Replace("__TARGET_DIR__", $targetDir)
 $uninstallScript = $uninstallScript.Replace("__START_MENU_DIR__", $startMenuDir)
 $uninstallScript = $uninstallScript.Replace("__DESKTOP_SHORTCUT__", $desktopShortcutPath)
+$uninstallScript = $uninstallScript.Replace("__RUN_VALUE_NAME__", $runValueName)
+$uninstallScript = $uninstallScript.Replace("__UNINSTALL_KEY_PATH__", $uninstallKeyPath)
 Set-Content -Path $uninstallScriptPath -Value $uninstallScript -Encoding ASCII
 
 $uninstallCommand = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $uninstallScriptPath
@@ -163,7 +186,9 @@ New-ItemProperty -Path $uninstallKeyPath -Name "UninstallString" -Value $uninsta
 $uninstallShortcut = Join-Path $startMenuDir "Uninstall PasteWinUI.lnk"
 New-AppShortcut -ShortcutPath $uninstallShortcut -TargetPath "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -Arguments "-NoProfile -ExecutionPolicy Bypass -File `"$uninstallScriptPath`""
 
-Start-Process -FilePath $exePath
+if ($env:PASTEWINUI_START_AFTER_INSTALL -ne "0") {
+    Start-Process -FilePath $exePath
+}
 '@
 $installPs1Content = $installPs1Content.Replace("__APP_VERSION__", $Version)
 Set-Content -Path $installPs1 -Value $installPs1Content -Encoding ASCII
@@ -186,10 +211,10 @@ DisplayLicense=
 FinishMessage=
 TargetName=$targetExe
 FriendlyName=PasteWinUI Setup
-AppLaunched=install.cmd
+AppLaunched=cmd.exe /c install.cmd
 PostInstallCmd=<None>
-AdminQuietInstCmd=install.cmd
-UserQuietInstCmd=install.cmd
+AdminQuietInstCmd=cmd.exe /c install.cmd
+UserQuietInstCmd=cmd.exe /c install.cmd
 SourceFiles=SourceFiles
 [SourceFiles]
 SourceFiles0=$workDir

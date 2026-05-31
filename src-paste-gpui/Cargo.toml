@@ -1,0 +1,19 @@
+[workspace]
+members = [
+    "crates/paste-core",
+    "crates/paste-windows-platform",
+    "crates/paste-gpui-app",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+publish = false
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = "s"
+panic = "abort"
+strip = "symbols"

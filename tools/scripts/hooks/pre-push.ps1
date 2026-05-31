@@ -13,8 +13,8 @@ if (-not (Test-Path $buildScript)) {
 
 Push-Location $repoRoot
 try {
-    Write-Host "[pre-push] Running tests..."
-    dotnet test paste.sln -c Release
+    Write-Host "[pre-push] Running Rust workspace tests..."
+    cargo test --manifest-path (Join-Path $repoRoot "src-paste-gpui\Cargo.toml") --workspace
     if ($LASTEXITCODE -ne 0) {
         Write-Error "[pre-push] Test execution failed."
         exit 1
