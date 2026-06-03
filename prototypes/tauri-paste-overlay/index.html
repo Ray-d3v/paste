@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Paste Overlay Tauri Prototype</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="desktop" aria-label="Desktop browser mock">
+      <section class="browser-window" aria-label="Mock browser">
+        <header class="browser-topbar">
+          <div class="window-controls" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div class="tab-strip" aria-label="Browser tabs">
+            <button class="browser-tab active">
+              <span class="tab-dot"></span>
+              Product notes
+            </button>
+            <button class="browser-tab">Design board</button>
+            <button class="browser-tab">Issue tracker</button>
+          </div>
+          <div class="browser-actions" aria-hidden="true">
+            <span></span>
+            <span></span>
+          </div>
+        </header>
+
+        <div class="address-row">
+          <div class="nav-buttons" aria-hidden="true">
+            <button>
+              <svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6" /></svg>
+            </button>
+            <button>
+              <svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg>
+            </button>
+            <button>
+              <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v6h-6" /></svg>
+            </button>
+          </div>
+          <div class="address-pill">
+            <svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V7l8-4z" /></svg>
+            <span>https://paste-lab.local/workspace</span>
+          </div>
+          <div class="nav-buttons" aria-hidden="true">
+            <button>
+              <svg viewBox="0 0 24 24"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
+            </button>
+          </div>
+        </div>
+
+        <section class="web-page" aria-label="Mock web content">
+          <div class="page-hero">
+            <div class="hero-copy">
+              <p class="eyebrow">Workspace / Notes</p>
+              <h1>Build notes for the next Paste overlay pass</h1>
+              <p>
+                A dense work surface behind the launcher makes transparency, blur,
+                and card contrast easier to judge.
+              </p>
+            </div>
+            <img
+              src="https://images.unsplash.com/photo-1518005020951-eccb494ad742?auto=format&fit=crop&w=960&q=80"
+              alt="Architectural glass facade"
+            />
+          </div>
+          <div class="content-grid">
+            <article>
+              <span>Meeting notes</span>
+              <strong>Rail polish</strong>
+              <p>Compare selected-card contrast against the darker panel tint.</p>
+            </article>
+            <article>
+              <span>Design</span>
+              <strong>Glass depth</strong>
+              <p>Keep one panel silhouette; avoid OS blur doubling the shape.</p>
+            </article>
+            <article>
+              <span>Links</span>
+              <strong>Reference tabs</strong>
+              <p>Use enough background detail to reveal the blur strength.</p>
+            </article>
+          </div>
+        </section>
+      </section>
+
+      <aside class="design-lab" aria-label="Overlay design controls">
+        <div class="lab-header">
+          <span>Overlay Lab</span>
+          <button id="resetButton">Reset</button>
+        </div>
+        <label>
+          <span>Width</span>
+          <input id="widthControl" type="range" min="76" max="96" value="90" />
+          <output id="widthValue">90%</output>
+        </label>
+        <label>
+          <span>Opacity</span>
+          <input id="opacityControl" type="range" min="45" max="96" value="60" />
+          <output id="opacityValue">0.60</output>
+        </label>
+        <label>
+          <span>Blur</span>
+          <input id="blurControl" type="range" min="0" max="28" value="10" />
+          <output id="blurValue">10px</output>
+        </label>
+        <label>
+          <span>Cards</span>
+          <input id="cardControl" type="range" min="180" max="280" value="244" />
+          <output id="cardValue">244px</output>
+        </label>
+        <div class="preset-row" aria-label="Preset options">
+          <button data-preset="paste">Paste</button>
+          <button data-preset="soft">Soft</button>
+          <button data-preset="dense">Dense</button>
+        </div>
+      </aside>
+
+      <section class="paste-overlay" aria-label="Paste clipboard overlay">
+        <div class="panel-sheen" aria-hidden="true"></div>
+        <header class="overlay-header">
+          <nav class="category-tabs" aria-label="Clipboard groups">
+            <label id="searchField" class="search-field" aria-label="Open clipboard search">
+              <svg viewBox="0 0 24 24"><path d="m21 21-4.3-4.3" /><circle cx="11" cy="11" r="7" /></svg>
+              <input id="searchInput" type="search" aria-label="Search clipboard" placeholder="Search clipboard..." />
+              <kbd>Ctrl F</kbd>
+            </label>
+            <div class="group-tab-list">
+              <button class="active history-tab" data-tab="history">
+                <svg class="group-icon history-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3 12a9 9 0 1 0 3-6.7" />
+                  <path d="M3 4.5v5h5" />
+                  <path d="M12 7.5v5l3 1.8" />
+                </svg>
+                <span class="group-label">History</span>
+              </button>
+              <button data-tab="private"><span class="group-dot private"></span><span class="group-label">プライベート</span></button>
+              <button data-tab="jobs"><span class="group-dot jobs"></span><span class="group-label">ジョブ</span></button>
+              <button data-tab="design"><span class="group-dot design"></span><span class="group-label">デザイン</span></button>
+              <button data-tab="ideas"><span class="group-dot ideas"></span><span class="group-label">アイデア</span></button>
+              <button data-tab="archive"><span class="group-dot archive"></span><span class="group-label">アーカイブ</span></button>
+            </div>
+            <button class="new-group-button" aria-label="新規グループを作成">
+              <svg viewBox="0 0 24 24"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
+            </button>
+          </nav>
+        </header>
+
+        <div class="card-rail" tabindex="0" aria-label="Clipboard card rail">
+          <article class="clip-card text-card selected" data-kind="Text">
+            <div class="card-top">
+              <span>Text</span>
+              <small>now</small>
+            </div>
+            <p>Meeting notes - GPUI rail polish. Screenshot comparison and Paste flow check.</p>
+            <footer><span>Codex</span><span>text</span></footer>
+          </article>
+
+          <article class="clip-card link-card" data-kind="Link">
+            <div class="card-top">
+              <span>Link</span>
+              <small>2m</small>
+            </div>
+            <div class="browser-preview">
+              <span></span>
+              <b></b>
+            </div>
+            <strong>pasteapp.io</strong>
+            <p>Paste for Mac reference</p>
+            <footer><span>Edge</span><span>link</span></footer>
+          </article>
+
+          <article class="clip-card image-card" data-kind="Image">
+            <div class="card-top">
+              <span>Image</span>
+              <small>6m</small>
+            </div>
+            <img
+              src="https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=480&q=80"
+              alt="Desk thumbnail"
+            />
+            <footer><span>1280 x 720</span><span>figma</span></footer>
+          </article>
+
+          <article class="clip-card file-card" data-kind="File">
+            <div class="card-top">
+              <span>File</span>
+              <small>8m</small>
+            </div>
+            <div class="file-icon">PDF</div>
+            <strong>proposal-v3.pdf</strong>
+            <footer><span>2.4 MB</span><span>file</span></footer>
+          </article>
+
+          <article class="clip-card code-card" data-kind="Code">
+            <div class="card-top">
+              <span>Code</span>
+              <small>14m</small>
+            </div>
+            <pre><span>1</span> fn main() {
+<span>2</span>   println!("hello");
+<span>3</span> }</pre>
+            <footer><span>Rust</span><span>code</span></footer>
+          </article>
+
+          <article class="clip-card fav-card" data-kind="Favorite">
+            <div class="card-top">
+              <span>Favorite</span>
+              <small>1h</small>
+            </div>
+            <div class="star-mark">
+              <svg viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.2 6.4 20.2 7.5 14 3 9.6l6.2-.9L12 3z" /></svg>
+            </div>
+            <strong>Email template</strong>
+            <footer><span>Mail</span><span>saved</span></footer>
+          </article>
+
+          <article class="clip-card text-card" data-kind="Text">
+            <div class="card-top">
+              <span>Text</span>
+              <small>2h</small>
+            </div>
+            <p>Follow up with benchmark table and Tauri memory measurement plan.</p>
+            <footer><span>Notes</span><span>text</span></footer>
+          </article>
+        </div>
+
+      </section>
+
+      <div class="taskbar" aria-hidden="true">
+        <span class="start"></span>
+        <span class="search">Search</span>
+        <span></span>
+        <span></span>
+        <span></span>
+        <time>03:12</time>
+      </div>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

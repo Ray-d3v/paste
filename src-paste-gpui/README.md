@@ -59,6 +59,7 @@ Latest full verification on 2026-05-31:
 - `smoke-text-paste`: passed
 - `smoke-link-paste`: passed
 - `smoke-image-paste`: passed
+- `smoke-file-paste`: passed
 - `smoke-tray-show-exit`: passed
 - `smoke-tray-rect`: passed
 - `smoke-tray-notification`: passed
@@ -242,6 +243,26 @@ Limitations:
 
 - This proves CF_BITMAP/CF_DIB image capture and paste into a simple target; it does not yet cover large images, alpha-sensitive image workflows, or application-specific rich image formats.
 - Text, hotkey, and image smoke scripts each manage the singleton `PasteWinUI.exe`; run them sequentially, not in parallel.
+
+## File Paste Smoke Check
+
+Measured with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/scripts/smoke-gpui-paste-file.ps1
+```
+
+Result:
+
+- Rust GPUI EXE launched successfully
+- A temporary external WinForms file-drop target launched successfully
+- The script created two temporary files, placed them on the clipboard as a file drop list, dispatched `Ctrl+Alt+V`, pressed `Enter`, and verified the target received a matching `CF_HDROP` file list
+- The persisted matching history entry was verified as `kind = File` with the expected `file_paths`
+
+Limitations:
+
+- This proves existing file paths are captured and pasted as `CF_HDROP`; virtual file transfer formats such as `CFSTR_FILEDESCRIPTOR`/`CFSTR_FILECONTENTS` are not implemented.
+- Text, hotkey, image, and file smoke scripts each manage the singleton `PasteWinUI.exe`; run them sequentially, not in parallel.
 
 ## Offline Installer Smoke Check
 

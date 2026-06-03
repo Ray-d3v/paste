@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
-    fs,
+    env, fs,
     io::{self, Cursor},
     path::{Path, PathBuf},
     time::Duration,
@@ -22,24 +22,50 @@ pub enum ClipboardKind {
     Text,
     Image,
     Link,
+    File,
+    Code,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ClipboardEntry {
+    #[serde(default)]
     pub kind: ClipboardKind,
+    #[serde(default)]
     pub content: String,
     #[serde(with = "time::serde::rfc3339")]
     pub copied_at: OffsetDateTime,
+    #[serde(default)]
     pub source_app: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_png_bytes: Option<Vec<u8>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_dib_bytes: Option<Vec<u8>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link_title: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub file_paths: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub file_names: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub file_extensions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_language: Option<String>,
+    #[serde(default)]
+    pub is_favorite: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pinned_group_id: Option<String>,
+    #[serde(default)]
     pub is_deleted: bool,
-    #[serde(with = "time::serde::rfc3339::option")]
+    #[serde(default, with = "time::serde::rfc3339::option")]
     pub deleted_at: Option<OffsetDateTime>,
+}
+
+impl Default for ClipboardKind {
+    fn default() -> Self {
+        Self::Text
+    }
 }
 
 impl ClipboardEntry {
@@ -53,6 +79,11 @@ impl ClipboardEntry {
             image_dib_bytes: None,
             link_url: None,
             link_title: None,
+            file_paths: Vec::new(),
+            file_names: Vec::new(),
+            file_extensions: Vec::new(),
+            code_language: None,
+            is_favorite: false,
             pinned_group_id: None,
             is_deleted: false,
             deleted_at: None,
@@ -138,6 +169,20 @@ pub enum ImageConversionError {
 }
 
 pub fn default_history_path() -> Result<PathBuf, HistoryStoreError> {
+    if let Ok(path) = env::var("PASTE_GPUI_HISTORY_PATH") {
+        let path = path.trim();
+        if !path.is_empty() {
+            return Ok(PathBuf::from(path));
+        }
+    }
+
+    if let Ok(path) = env::var("PASTE_GPUI_DATA_DIR") {
+        let path = path.trim();
+        if !path.is_empty() {
+            return Ok(PathBuf::from(path).join("PasteGPUI").join("history.json"));
+        }
+    }
+
     dirs::data_local_dir()
         .map(|path| path.join("PasteGPUI").join("history.json"))
         .ok_or(HistoryStoreError::LocalDataDirectoryUnavailable)
@@ -375,6 +420,19 @@ pub fn is_likely_duplicate(
                 _ => false,
             },
         },
+        ClipboardKind::File => {
+            !existing.file_paths.is_empty()
+                && existing.file_paths.len() == incoming.file_paths.len()
+                && existing
+                    .file_paths
+                    .iter()
+                    .map(|path| normalize_file_path_for_comparison(path))
+                    .eq(incoming
+                        .file_paths
+                        .iter()
+                        .map(|path| normalize_file_path_for_comparison(path)))
+        }
+        ClipboardKind::Code => existing.content == incoming.content,
         ClipboardKind::Text => existing.content == incoming.content,
     }
 }
@@ -402,6 +460,14 @@ pub fn merge_entries(existing: &ClipboardEntry, incoming: &ClipboardEntry) -> Cl
             incoming.link_title.as_deref(),
             existing.link_title.as_deref(),
         ),
+        file_paths: choose_preferred_vec(&incoming.file_paths, &existing.file_paths),
+        file_names: choose_preferred_vec(&incoming.file_names, &existing.file_names),
+        file_extensions: choose_preferred_vec(&incoming.file_extensions, &existing.file_extensions),
+        code_language: choose_preferred_text(
+            incoming.code_language.as_deref(),
+            existing.code_language.as_deref(),
+        ),
+        is_favorite: existing.is_favorite || incoming.is_favorite,
         pinned_group_id: existing
             .pinned_group_id
             .clone()
@@ -422,6 +488,10 @@ pub fn normalize_link_for_comparison(raw_link: &str) -> String {
     format!("{scheme}://{without_trailing_slash}")
 }
 
+pub fn normalize_file_path_for_comparison(raw_path: &str) -> String {
+    raw_path.trim().replace('/', "\\").to_lowercase()
+}
+
 pub fn entry_matches_search(entry: &ClipboardEntry, query: &str) -> bool {
     let query = query.trim().to_lowercase();
     if query.is_empty() {
@@ -432,17 +502,36 @@ pub fn entry_matches_search(entry: &ClipboardEntry, query: &str) -> bool {
         ClipboardKind::Text => "text",
         ClipboardKind::Image => "image",
         ClipboardKind::Link => "link",
+        ClipboardKind::File => "file",
+        ClipboardKind::Code => "code",
     };
 
     contains_casefold(kind, &query)
         || contains_casefold(&entry.source_app, &query)
         || contains_casefold(&entry.content, &query)
+        || (entry.is_favorite && contains_casefold("favorite", &query))
         || entry
             .link_url
             .as_deref()
             .is_some_and(|value| contains_casefold(value, &query))
         || entry
             .link_title
+            .as_deref()
+            .is_some_and(|value| contains_casefold(value, &query))
+        || entry
+            .file_paths
+            .iter()
+            .any(|value| contains_casefold(value, &query))
+        || entry
+            .file_names
+            .iter()
+            .any(|value| contains_casefold(value, &query))
+        || entry
+            .file_extensions
+            .iter()
+            .any(|value| contains_casefold(value, &query))
+        || entry
+            .code_language
             .as_deref()
             .is_some_and(|value| contains_casefold(value, &query))
 }
@@ -466,16 +555,49 @@ pub fn visible_entries(
         .cloned()
         .collect::<Vec<_>>();
 
+    visible.sort_by(|left, right| right.copied_at.cmp(&left.copied_at));
+
+    visible
+}
+
+pub fn visible_favorite_entries(
+    entries: &[ClipboardEntry],
+    is_trash_view: bool,
+    search_query: &str,
+) -> Vec<ClipboardEntry> {
+    let mut visible = entries
+        .iter()
+        .filter(|entry| entry.is_deleted == is_trash_view)
+        .filter(|entry| entry.is_favorite)
+        .filter(|entry| entry_matches_search(entry, search_query))
+        .cloned()
+        .collect::<Vec<_>>();
+
     visible.sort_by(|left, right| {
-        if active_pinned_group_id.is_none() {
-            right
-                .is_pinned()
-                .cmp(&left.is_pinned())
-                .then_with(|| right.copied_at.cmp(&left.copied_at))
-        } else {
-            right.copied_at.cmp(&left.copied_at)
-        }
+        right
+            .copied_at
+            .cmp(&left.copied_at)
+            .then_with(|| right.content.cmp(&left.content))
     });
+
+    visible
+}
+
+pub fn visible_kind_entries(
+    entries: &[ClipboardEntry],
+    is_trash_view: bool,
+    kind: ClipboardKind,
+    search_query: &str,
+) -> Vec<ClipboardEntry> {
+    let mut visible = entries
+        .iter()
+        .filter(|entry| entry.is_deleted == is_trash_view)
+        .filter(|entry| entry.kind == kind)
+        .filter(|entry| entry_matches_search(entry, search_query))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    visible.sort_by(|left, right| right.copied_at.cmp(&left.copied_at));
 
     visible
 }
@@ -522,6 +644,8 @@ pub fn paste_risk_reason(entry: &ClipboardEntry, length_threshold: usize) -> Opt
         ClipboardKind::Text => entry.content.as_str(),
         ClipboardKind::Link => entry.link_url.as_deref().unwrap_or(entry.content.as_str()),
         ClipboardKind::Image => return None,
+        ClipboardKind::File => return None,
+        ClipboardKind::Code => entry.content.as_str(),
     };
 
     if text.trim().is_empty() {
@@ -695,6 +819,14 @@ fn choose_preferred_text(preferred: Option<&str>, fallback: Option<&str>) -> Opt
         .map(ToString::to_string)
 }
 
+fn choose_preferred_vec(preferred: &[String], fallback: &[String]) -> Vec<String> {
+    if preferred.is_empty() {
+        fallback.to_vec()
+    } else {
+        preferred.to_vec()
+    }
+}
+
 fn contains_casefold(value: &str, query: &str) -> bool {
     value.to_lowercase().contains(query)
 }
@@ -757,14 +889,14 @@ mod tests {
     }
 
     #[test]
-    fn visible_entries_orders_pinned_first_then_newest() {
+    fn visible_entries_orders_newest_first() {
         let mut old = ClipboardEntry::text("old", at(90));
         old.pinned_group_id = Some("quick".to_string());
         let new = ClipboardEntry::text("new", at(100));
 
         let visible = visible_entries(&[new.clone(), old.clone()], false, None, "");
 
-        assert_eq!(visible, vec![old, new]);
+        assert_eq!(visible, vec![new, old]);
     }
 
     #[test]
@@ -790,6 +922,57 @@ mod tests {
             &incoming,
             Duration::from_secs(10)
         ));
+    }
+
+    #[test]
+    fn duplicate_file_matches_normalized_paths() {
+        let mut existing = ClipboardEntry::text("[Files: 1]", at(0));
+        existing.kind = ClipboardKind::File;
+        existing.file_paths = vec![r"C:\Temp\Report.pdf".to_string()];
+        let mut incoming = ClipboardEntry::text("[Files: 1]", at(1));
+        incoming.kind = ClipboardKind::File;
+        incoming.file_paths = vec!["c:/temp/report.pdf".to_string()];
+
+        assert!(is_likely_duplicate(
+            &existing,
+            &incoming,
+            Duration::from_secs(10)
+        ));
+    }
+
+    #[test]
+    fn duplicate_code_matches_content() {
+        let mut existing = ClipboardEntry::text("fn main() {}", at(0));
+        existing.kind = ClipboardKind::Code;
+        existing.code_language = Some("rust".to_string());
+        let mut incoming = ClipboardEntry::text("fn main() {}", at(1));
+        incoming.kind = ClipboardKind::Code;
+        incoming.code_language = Some("rust".to_string());
+
+        assert!(is_likely_duplicate(
+            &existing,
+            &incoming,
+            Duration::from_secs(10)
+        ));
+    }
+
+    #[test]
+    fn entry_matches_file_code_and_favorite_metadata() {
+        let mut file = ClipboardEntry::text("[Files: 1]", at(0));
+        file.kind = ClipboardKind::File;
+        file.file_paths = vec![r"C:\Temp\Report.pdf".to_string()];
+        file.file_names = vec!["Report.pdf".to_string()];
+        file.file_extensions = vec!["pdf".to_string()];
+
+        let mut code = ClipboardEntry::text("Write-Host hi", at(1));
+        code.kind = ClipboardKind::Code;
+        code.code_language = Some("powershell".to_string());
+        code.is_favorite = true;
+
+        assert!(entry_matches_search(&file, "report"));
+        assert!(entry_matches_search(&file, "pdf"));
+        assert!(entry_matches_search(&code, "powershell"));
+        assert!(entry_matches_search(&code, "favorite"));
     }
 
     #[test]
@@ -824,6 +1007,28 @@ mod tests {
         let group = create_group("My Group", &groups);
 
         assert_eq!(group.id, "my-group-2");
+    }
+
+    #[test]
+    fn rename_group_preserves_identity_and_sanitizes_name() {
+        let group = PinnedGroup::new("my-group", "My Group", "amber", 0);
+
+        let renamed = rename_group(&group, "  Updated Group  ");
+
+        assert_eq!(renamed.id, "my-group");
+        assert_eq!(renamed.name, "Updated Group");
+        assert_eq!(renamed.color_key, "amber");
+    }
+
+    #[test]
+    fn visible_favorite_entries_filters_favorites() {
+        let mut favorite = ClipboardEntry::text("favorite", at(10));
+        favorite.is_favorite = true;
+        let plain = ClipboardEntry::text("plain", at(20));
+
+        let visible = visible_favorite_entries(&[plain, favorite.clone()], false, "");
+
+        assert_eq!(visible, vec![favorite]);
     }
 
     #[test]
@@ -863,6 +1068,73 @@ mod tests {
         let decoded: ClipboardHistoryDocument = serde_json::from_str(&json).unwrap();
 
         assert_eq!(decoded, document);
+    }
+
+    #[test]
+    fn legacy_history_json_defaults_extended_fields() {
+        let json = r#"{
+            "groups": [],
+            "entries": [{
+                "kind": "Text",
+                "content": "hello",
+                "copied_at": "1970-01-01T00:00:01Z"
+            }]
+        }"#;
+
+        let decoded: ClipboardHistoryDocument = serde_json::from_str(json).unwrap();
+
+        assert_eq!(decoded.entries[0].kind, ClipboardKind::Text);
+        assert_eq!(decoded.entries[0].source_app, "");
+        assert!(decoded.entries[0].file_paths.is_empty());
+        assert_eq!(decoded.entries[0].code_language, None);
+        assert!(!decoded.entries[0].is_favorite);
+    }
+
+    #[test]
+    fn history_json_accepts_extended_entries_with_missing_optional_fields() {
+        let json = r#"
+        {
+            "groups": [
+                { "id": "quick", "name": "Quick", "color_key": "purple", "sort_order": 0 }
+            ],
+            "entries": [
+                {
+                    "kind": "Text",
+                    "content": "Meeting notes",
+                    "copied_at": "2026-05-31T15:36:20Z",
+                    "source_app": "Notes",
+                    "is_favorite": false,
+                    "is_deleted": false
+                },
+                {
+                    "kind": "Code",
+                    "content": "fn main() {}",
+                    "copied_at": "2026-05-31T15:36:19Z",
+                    "source_app": "Terminal",
+                    "code_language": "rust",
+                    "is_favorite": true,
+                    "is_deleted": false
+                },
+                {
+                    "kind": "File",
+                    "content": "C:\\Temp\\proposal.pdf",
+                    "copied_at": "2026-05-31T15:36:16Z",
+                    "source_app": "Explorer",
+                    "file_paths": ["C:\\Temp\\proposal.pdf"],
+                    "file_names": ["proposal.pdf"],
+                    "file_extensions": ["pdf"],
+                    "is_favorite": false,
+                    "is_deleted": false
+                }
+            ]
+        }
+        "#;
+
+        let decoded: ClipboardHistoryDocument = serde_json::from_str(json).unwrap();
+
+        assert_eq!(decoded.entries.len(), 3);
+        assert_eq!(decoded.entries[1].code_language.as_deref(), Some("rust"));
+        assert_eq!(decoded.entries[2].file_extensions, vec!["pdf"]);
     }
 
     #[test]

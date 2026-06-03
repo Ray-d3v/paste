@@ -1,5 +1,5 @@
 use std::{
-    mem::size_of,
+    mem::{size_of, size_of_val},
     sync::{
         atomic::{AtomicUsize, Ordering},
         mpsc, Mutex, OnceLock,
@@ -13,9 +13,14 @@ use windows::{
     core::{w, Error as WindowsError, BOOL, PCWSTR, PWSTR},
     Win32::{
         Foundation::{CloseHandle, HANDLE, HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM},
+        Graphics::Dwm::{
+            DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE,
+            DWMWCP_DONOTROUND,
+        },
         Graphics::Gdi::{
-            GetDC, GetDIBits, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
-            DIB_RGB_COLORS, HBITMAP, HGDIOBJ,
+            CreateRoundRectRgn, DeleteObject, GetDC, GetDIBits, GetObjectW, ReleaseDC,
+            SetWindowRgn, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP,
+            HGDIOBJ,
         },
         System::{
             DataExchange::{
@@ -24,8 +29,10 @@ use windows::{
                 SetClipboardData,
             },
             LibraryLoader::GetModuleHandleW,
-            Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE},
-            Ole::{CF_BITMAP, CF_DIB, CF_UNICODETEXT},
+            Memory::{
+                GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT,
+            },
+            Ole::{CF_BITMAP, CF_DIB, CF_HDROP, CF_UNICODETEXT},
             Threading::{
                 AttachThreadInput, GetCurrentProcessId, GetCurrentThreadId, OpenProcess,
                 QueryFullProcessImageNameW, PROCESS_NAME_FORMAT, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -39,9 +46,9 @@ use windows::{
                 VK_SHIFT, VK_V,
             },
             Shell::{
-                Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE,
-                NIM_SETVERSION, NOTIFYICONDATAW, NOTIFYICONDATAW_0, NOTIFYICON_VERSION_4,
-                NOTIFY_ICON_DATA_FLAGS,
+                DragQueryFileW, Shell_NotifyIconW, DROPFILES, HDROP, NIF_ICON, NIF_MESSAGE,
+                NIF_TIP, NIM_ADD, NIM_DELETE, NIM_SETVERSION, NOTIFYICONDATAW, NOTIFYICONDATAW_0,
+                NOTIFYICON_VERSION_4, NOTIFY_ICON_DATA_FLAGS,
             },
             WindowsAndMessaging::{
                 AllowSetForegroundWindow, AppendMenuW, BringWindowToTop, CreatePopupMenu,
@@ -49,12 +56,13 @@ use windows::{
                 EnumWindows, GetAncestor, GetCursorPos, GetForegroundWindow, GetGUIThreadInfo,
                 GetMessageW, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
                 IsIconic, IsWindow, LoadIconW, PostMessageW, PostQuitMessage, RegisterClassW,
-                SetForegroundWindow, SetWindowPos, ShowWindow, TrackPopupMenuEx, TranslateMessage,
-                GA_ROOT, GUITHREADINFO, HICON, HWND_TOPMOST, IDI_APPLICATION, MF_STRING, MSG,
-                SWP_NOACTIVATE, SWP_NOOWNERZORDER, SW_HIDE, SW_RESTORE, TPM_BOTTOMALIGN,
-                TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE,
-                WM_CLIPBOARDUPDATE, WM_CLOSE, WM_CONTEXTMENU, WM_DESTROY, WM_HOTKEY, WM_LBUTTONUP,
-                WM_PASTE, WNDCLASSW,
+                SetForegroundWindow, SetWindowPos, ShowWindow, SystemParametersInfoW,
+                TrackPopupMenuEx, TranslateMessage, GA_ROOT, GUITHREADINFO, HICON, HWND_TOPMOST,
+                IDI_APPLICATION, MF_STRING, MSG, SPI_GETCLIENTAREAANIMATION, SWP_NOACTIVATE,
+                SWP_NOOWNERZORDER, SW_HIDE, SW_RESTORE, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+                TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, WINDOW_EX_STYLE,
+                WINDOW_STYLE, WM_CLIPBOARDUPDATE, WM_CLOSE, WM_CONTEXTMENU, WM_DESTROY, WM_HOTKEY,
+                WM_LBUTTONUP, WM_PASTE, WNDCLASSW,
             },
         },
     },
@@ -75,6 +83,7 @@ pub const PLATFORM_STATUS_TRAY_ICON: usize = 0x04;
 const TRAY_MENU_SHOW: usize = 0x5101;
 const TRAY_MENU_RESTART: usize = 0x5102;
 const TRAY_MENU_EXIT: usize = 0x5103;
+const DWMWA_COLOR_NONE: u32 = 0xFFFFFFFE;
 const NIN_SELECT: u32 = 0x0400;
 const NIN_KEYSELECT: u32 = 0x0401;
 static PLATFORM_FEATURE_STATUS: AtomicUsize = AtomicUsize::new(0);
@@ -146,9 +155,12 @@ pub trait PlatformIntegration {
     fn is_window(&self, window: WindowHandle) -> bool;
     fn read_text_from_clipboard(&self) -> Result<Option<String>, PlatformError>;
     fn read_image_dib_from_clipboard(&self) -> Result<Option<Vec<u8>>, PlatformError>;
+    fn read_file_paths_from_clipboard(&self) -> Result<Option<Vec<String>>, PlatformError>;
     fn write_text_to_clipboard(&self, text: &str) -> Result<(), PlatformError>;
     fn write_image_dib_to_clipboard(&self, dib_bytes: &[u8]) -> Result<(), PlatformError>;
+    fn write_file_paths_to_clipboard(&self, file_paths: &[String]) -> Result<(), PlatformError>;
     fn paste_into_window(&self, target: WindowHandle) -> Result<(), PlatformError>;
+    fn client_area_animations_enabled(&self) -> bool;
     fn find_window_by_title(&self, title: &str) -> Result<Option<WindowHandle>, PlatformError>;
     fn show_window(&self, window: WindowHandle) -> Result<(), PlatformError>;
     fn hide_window(&self, window: WindowHandle) -> Result<(), PlatformError>;
@@ -188,6 +200,79 @@ pub struct WindowsPlatformIntegration;
 impl WindowsPlatformIntegration {
     pub fn new() -> Self {
         Self
+    }
+
+    #[cfg(windows)]
+    pub fn suppress_window_border(&self, window: WindowHandle) -> Result<(), PlatformError> {
+        ensure_window(window)?;
+        let color = DWMWA_COLOR_NONE;
+        unsafe {
+            DwmSetWindowAttribute(
+                window.hwnd(),
+                DWMWA_BORDER_COLOR,
+                &color as *const _ as *const _,
+                size_of::<u32>() as u32,
+            )
+        }
+        .map_err(|source| PlatformError::Win32 {
+            operation: "DwmSetWindowAttribute(DWMWA_BORDER_COLOR)",
+            source,
+        })
+    }
+
+    #[cfg(not(windows))]
+    pub fn suppress_window_border(&self, _window: WindowHandle) -> Result<(), PlatformError> {
+        Err(PlatformError::NotImplemented)
+    }
+
+    #[cfg(windows)]
+    pub fn apply_overlay_window_shape(
+        &self,
+        window: WindowHandle,
+        width: i32,
+        height: i32,
+        radius: i32,
+    ) -> Result<(), PlatformError> {
+        ensure_window(window)?;
+
+        let corner_preference = DWMWCP_DONOTROUND;
+        let _ = unsafe {
+            DwmSetWindowAttribute(
+                window.hwnd(),
+                DWMWA_WINDOW_CORNER_PREFERENCE,
+                &corner_preference as *const _ as *const _,
+                size_of_val(&corner_preference) as u32,
+            )
+        };
+
+        let width = width.max(1);
+        let height = height.max(1);
+        let diameter = radius.max(1).saturating_mul(2);
+        let region = unsafe { CreateRoundRectRgn(0, 0, width + 1, height + 1, diameter, diameter) };
+        if region.is_invalid() {
+            return Err(Self::win32_error("CreateRoundRectRgn"));
+        }
+
+        let result = unsafe { SetWindowRgn(window.hwnd(), Some(region), true) };
+        if result == 0 {
+            unsafe {
+                let _ = DeleteObject(HGDIOBJ(region.0));
+            }
+            return Err(Self::win32_error("SetWindowRgn"));
+        }
+
+        Ok(())
+    }
+
+    #[cfg(not(windows))]
+    pub fn apply_overlay_window_shape(
+        &self,
+        _window: WindowHandle,
+        _width: i32,
+        _height: i32,
+        _radius: i32,
+    ) -> Result<(), PlatformError> {
+        Err(PlatformError::NotImplemented)
     }
 
     #[cfg(windows)]
@@ -437,6 +522,51 @@ impl PlatformIntegration for WindowsPlatformIntegration {
         }
     }
 
+    fn read_file_paths_from_clipboard(&self) -> Result<Option<Vec<String>>, PlatformError> {
+        let _guard = ClipboardGuard::open()?;
+        if unsafe { IsClipboardFormatAvailable(CF_HDROP.0 as u32) }.is_err() {
+            return Ok(None);
+        }
+
+        let handle = unsafe { GetClipboardData(CF_HDROP.0 as u32) }.map_err(|source| {
+            PlatformError::Win32 {
+                operation: "GetClipboardData(CF_HDROP)",
+                source,
+            }
+        })?;
+        if handle.is_invalid() {
+            return Ok(None);
+        }
+
+        let hdrop = HDROP(handle.0);
+        let count = unsafe { DragQueryFileW(hdrop, u32::MAX, None) };
+        if count == 0 {
+            return Ok(None);
+        }
+
+        let mut paths = Vec::with_capacity(count as usize);
+        for index in 0..count {
+            let len = unsafe { DragQueryFileW(hdrop, index, None) };
+            if len == 0 {
+                continue;
+            }
+
+            let mut buffer = vec![0u16; len as usize + 1];
+            let copied = unsafe { DragQueryFileW(hdrop, index, Some(&mut buffer)) };
+            if copied == 0 {
+                continue;
+            }
+
+            paths.push(String::from_utf16_lossy(&buffer[..copied as usize]));
+        }
+
+        if paths.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(paths))
+        }
+    }
+
     fn write_image_dib_to_clipboard(&self, dib_bytes: &[u8]) -> Result<(), PlatformError> {
         if dib_bytes.is_empty() {
             return Ok(());
@@ -481,6 +611,77 @@ impl PlatformIntegration for WindowsPlatformIntegration {
         Ok(())
     }
 
+    fn write_file_paths_to_clipboard(&self, file_paths: &[String]) -> Result<(), PlatformError> {
+        let mut wide_paths = Vec::new();
+        for path in file_paths
+            .iter()
+            .map(|path| path.trim())
+            .filter(|path| !path.is_empty())
+        {
+            wide_paths.extend(path.encode_utf16());
+            wide_paths.push(0);
+        }
+        if wide_paths.is_empty() {
+            return Ok(());
+        }
+        wide_paths.push(0);
+
+        let dropfiles_size = size_of::<DROPFILES>();
+        let bytes = dropfiles_size + wide_paths.len() * size_of::<u16>();
+
+        let _guard = ClipboardGuard::open()?;
+        unsafe { EmptyClipboard() }.map_err(|source| PlatformError::Win32 {
+            operation: "EmptyClipboard",
+            source,
+        })?;
+
+        let handle =
+            unsafe { GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, bytes) }.map_err(|source| {
+                PlatformError::Win32 {
+                    operation: "GlobalAlloc(CF_HDROP)",
+                    source,
+                }
+            })?;
+        if handle.is_invalid() {
+            return Err(Self::win32_error("GlobalAlloc(CF_HDROP)"));
+        }
+
+        let ptr = unsafe { GlobalLock(handle) } as *mut u8;
+        if ptr.is_null() {
+            return Err(Self::win32_error("GlobalLock(CF_HDROP)"));
+        }
+
+        unsafe {
+            std::ptr::write(
+                ptr as *mut DROPFILES,
+                DROPFILES {
+                    pFiles: dropfiles_size as u32,
+                    pt: POINT::default(),
+                    fNC: BOOL(0),
+                    fWide: BOOL(1),
+                },
+            );
+            std::ptr::copy_nonoverlapping(
+                wide_paths.as_ptr() as *const u8,
+                ptr.add(dropfiles_size),
+                wide_paths.len() * size_of::<u16>(),
+            );
+            let _ = GlobalUnlock(handle);
+        }
+
+        let set = unsafe { SetClipboardData(CF_HDROP.0 as u32, Some(HANDLE(handle.0))) }.map_err(
+            |source| PlatformError::Win32 {
+                operation: "SetClipboardData(CF_HDROP)",
+                source,
+            },
+        )?;
+        if set.is_invalid() {
+            return Err(Self::win32_error("SetClipboardData(CF_HDROP)"));
+        }
+
+        Ok(())
+    }
+
     fn paste_into_window(&self, target: WindowHandle) -> Result<(), PlatformError> {
         let target = self
             .resolve_top_level_window(target)
@@ -500,6 +701,20 @@ impl PlatformIntegration for WindowsPlatformIntegration {
         }
 
         Err(Self::win32_error("paste injection"))
+    }
+
+    fn client_area_animations_enabled(&self) -> bool {
+        let mut enabled = BOOL(1);
+        unsafe {
+            SystemParametersInfoW(
+                SPI_GETCLIENTAREAANIMATION,
+                0,
+                Some((&mut enabled as *mut BOOL).cast::<core::ffi::c_void>()),
+                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS::default(),
+            )
+        }
+        .is_ok()
+            && enabled.as_bool()
     }
 
     fn find_window_by_title(&self, title: &str) -> Result<Option<WindowHandle>, PlatformError> {
@@ -1034,6 +1249,10 @@ impl PlatformIntegration for WindowsPlatformIntegration {
         Err(PlatformError::NotImplemented)
     }
 
+    fn read_file_paths_from_clipboard(&self) -> Result<Option<Vec<String>>, PlatformError> {
+        Err(PlatformError::NotImplemented)
+    }
+
     fn write_text_to_clipboard(&self, _text: &str) -> Result<(), PlatformError> {
         Err(PlatformError::NotImplemented)
     }
@@ -1042,8 +1261,16 @@ impl PlatformIntegration for WindowsPlatformIntegration {
         Err(PlatformError::NotImplemented)
     }
 
+    fn write_file_paths_to_clipboard(&self, _file_paths: &[String]) -> Result<(), PlatformError> {
+        Err(PlatformError::NotImplemented)
+    }
+
     fn paste_into_window(&self, _target: WindowHandle) -> Result<(), PlatformError> {
         Err(PlatformError::NotImplemented)
+    }
+
+    fn client_area_animations_enabled(&self) -> bool {
+        true
     }
 
     fn find_window_by_title(&self, _title: &str) -> Result<Option<WindowHandle>, PlatformError> {

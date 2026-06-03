@@ -111,11 +111,11 @@ Manual acceptance helper:
 | Core/UI/platform split | Verified | `paste-core` holds models and pure logic; `paste-windows-platform` holds Win32 integration; `paste-gpui-app` holds GPUI UI and state. |
 | New JSON history store | Verified | `paste-core::default_history_path` targets `%LOCALAPPDATA%\PasteGPUI\history.json`; app loads/saves via `load_history_document` and `save_history_document`. |
 | No legacy history migration | Verified | No migration path from WinUI data exists in the Rust app; new store is independent. |
-| Entry fields | Verified | `ClipboardEntry` includes `kind`, `content`, `copied_at`, `source_app`, `image_png_bytes`, `link_url`, `link_title`, `pinned_group_id`, `is_deleted`, `deleted_at`; Rust app also stores `image_dib_bytes` for Windows image paste fidelity. |
+| Entry fields | Verified | `ClipboardEntry` includes `kind`, `content`, `copied_at`, `source_app`, image payloads, link metadata, `file_paths`, `file_names`, `file_extensions`, `code_language`, `is_favorite`, pin/trash fields, and serde defaults for older GPUI history JSON. |
 | Debounced persistence | Verified | `paste-gpui-app` uses `HISTORY_SAVE_DEBOUNCE` and `schedule_history_save`. |
 | History cap and trash retention | Verified | `paste-core::RetentionPolicy` and `enforce_retention`; unit test `retention_drops_old_trash_and_caps_active_history`. |
-| Duplicate detection | Verified | `paste-core::is_likely_duplicate`; unit test `duplicate_link_ignores_fragment_and_trailing_slash`. |
-| Search matching | Verified | `paste-core::entry_matches_query` and `visible_entries`; unit test `entry_matches_link_metadata`. UI uses `Ctrl+F` and `search_query`. |
+| Duplicate detection | Verified | `paste-core::is_likely_duplicate`; unit tests cover Link, File, and Code duplicates. |
+| Search matching | Verified | `paste-core::entry_matches_search`, `visible_entries`, `visible_kind_entries`, and `visible_favorite_entries`; unit tests cover link metadata plus File/Code/Favorite metadata. UI uses `Ctrl+F` and `search_query`. |
 | Pinned group create/rename/delete | Verified | `create_group`, `rename_group`, `delete_group`; unit tests cover create and delete behavior. |
 | Initial pinned groups | Verified | `seeded_groups` defines Quick, Work, Idea; UI binds `Ctrl+1`, `Ctrl+2`, `Ctrl+3`, `Ctrl+0`. |
 | Trash restore/retention | Verified | UI `DeleteSelected` and `RestoreSelected`; retention unit test covers trash expiry. |
@@ -123,7 +123,7 @@ Manual acceptance helper:
 | Text clipboard support | Verified | `read_text_from_clipboard`, `write_text_to_clipboard`; `smoke-gpui-paste-text.ps1` passed. |
 | Link clipboard support | Verified | URL classification in `entry_from_clipboard_text`; `smoke-gpui-paste-link.ps1` verifies paste and persisted `kind = Link`. |
 | Image clipboard support | Verified | CF_DIB/CF_BITMAP read/write in `paste-windows-platform`; `smoke-gpui-paste-image.ps1` passed. |
-| File clipboard support | Out of scope | Plan explicitly defers file items. |
+| File clipboard support | Verified | `CF_HDROP` read/write in `paste-windows-platform`; `smoke-gpui-paste-file.ps1` verifies persisted `kind = File` and pasted file-drop list. |
 | Advanced icon extraction | Out of scope | Plan explicitly defers advanced icon extraction. |
 | Global hotkey `Ctrl+Alt+V` | Verified | `RegisterHotKey` in `paste-windows-platform`; `smoke-gpui-hotkey.ps1` passed. |
 | Clipboard monitoring | Verified | `AddClipboardFormatListener` in message loop; smokes capture text/link/image after clipboard changes. |

@@ -55,6 +55,8 @@ $requiredCheckIds = @(
     "tray_menu_restart",
     "tray_menu_exit",
     "overlay_bottom_slide",
+    "overlay_card_types",
+    "overlay_preview_panels",
     "overlay_escape_hide",
     "installer_default_installs",
     "installer_default_shortcuts_uninstall",

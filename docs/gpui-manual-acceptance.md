@@ -128,6 +128,27 @@ Expected:
 - Keyboard focus is inside the overlay.
 - Pressing `Esc` hides the overlay immediately.
 
+## Paste UI Visual And File Checks
+
+1. Create at least five clipboard history entries covering text, link, image,
+   file, and code content. Mark one entry as a favorite from the command
+   palette.
+2. Press `Ctrl+Alt+V`.
+
+Expected:
+
+- The bottom panel shows search, category tabs, Pinboard tabs, horizontal cards,
+  a preview area, status/footer text, and no vertical-only list layout.
+- Text, Link, Image, File, Code, and Favorite states are visually distinct by
+  card label, color, title, and metadata.
+- Left/Right changes the selected card. Up/Down remain usable selection aliases.
+- `Ctrl+K` opens the command palette.
+- The command palette can open the context menu and settings panel.
+- `Delete` opens a delete confirmation. `Enter` confirms and `Esc` cancels.
+Automated file coverage: `tools/scripts/smoke-gpui-paste-file.ps1` creates
+temporary files, captures them as a File entry, pastes through the overlay, and
+verifies the target receives a Windows file-drop clipboard payload (`CF_HDROP`).
+
 ## Installer Physical Smoke
 
 Automated coverage: `tools/scripts/verify-gpui-release.ps1` runs

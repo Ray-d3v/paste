@@ -114,6 +114,8 @@ $checks = @(
     Read-ChecklistResult -Id "tray_menu_restart" -Category "physical_shell" -Prompt "Physical tray menu Restart changed the PasteWinUI process ID; no visible UI change is required"
     Read-ChecklistResult -Id "tray_menu_exit" -Category "physical_shell" -Prompt "Physical tray menu Exit stopped PasteWinUI"
     Read-ChecklistResult -Id "overlay_bottom_slide" -Category "visual_manual" -Prompt "Ctrl+Alt+V showed a bottom overlay with slide-up motion on the target display"
+    Read-ChecklistResult -Id "overlay_card_types" -Category "visual_manual" -Prompt "Overlay showed horizontal cards and visually distinct Text/Link/Image/File/Code/Favorite states"
+    Read-ChecklistResult -Id "overlay_preview_panels" -Category "visual_manual" -Prompt "Overlay preview, command palette, context menu, delete confirmation, and settings panel were reachable"
     Read-ChecklistResult -Id "overlay_escape_hide" -Category "visual_manual" -Prompt "Esc hid the overlay immediately on the target display"
     Read-ChecklistResult -Id "installer_default_installs" -Category "physical_installer" -Prompt "Default offline installer installed to LocalAppData Programs when run interactively"
     Read-ChecklistResult -Id "installer_default_shortcuts_uninstall" -Category "physical_installer" -Prompt "Default installer created Start Menu shortcuts and uninstall entry"

@@ -90,45 +90,75 @@ try {
     }
 
     if (-not $SkipSmokes) {
-        Invoke-Step "smoke-hotkey" {
-            powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tools/scripts/smoke-gpui-hotkey.ps1")
-        } -Retries 1
+        $originalLocalAppData = $env:LOCALAPPDATA
+        $originalPasteDataDir = $env:PASTE_GPUI_DATA_DIR
+        $originalPasteEnableMotion = $env:PASTE_GPUI_ENABLE_MOTION
+        $smokeLocalAppData = Join-Path $repoRoot "artifacts\smoke-localappdata"
+        New-Item -ItemType Directory -Path $smokeLocalAppData -Force | Out-Null
+        $env:LOCALAPPDATA = $smokeLocalAppData
+        $env:PASTE_GPUI_DATA_DIR = $smokeLocalAppData
+        $env:PASTE_GPUI_ENABLE_MOTION = "1"
+        try {
+            Invoke-Step "smoke-hotkey" {
+                powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tools/scripts/smoke-gpui-hotkey.ps1")
+            } -Retries 1
 
-        Invoke-Step "smoke-slide-up" {
-            powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tools/scripts/smoke-gpui-slide.ps1")
-        } -Retries 1
+            Invoke-Step "smoke-slide-up" {
+                powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tools/scripts/smoke-gpui-slide.ps1")
+            } -Retries 1
 
-        Invoke-Step "smoke-command-palette" {
-            powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tools/scripts/smoke-gpui-command-palette.ps1") -AllowSyntheticInputUnavailable
-        } -Retries 1
+            Invoke-Step "smoke-command-palette" {
+                powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tools/scripts/smoke-gpui-command-palette.ps1") -AllowSyntheticInputUnavailable
+            } -Retries 1
 
-        Invoke-Step "smoke-text-paste" {
-            powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tools/scripts/smoke-gpui-paste-text.ps1") -OverlayDelayMs $SmokeDelayMs -PasteDelayMs $SmokeDelayMs -AllowForegroundUnavailable
-        } -Retries 1
+            Invoke-Step "smoke-text-paste" {
+                powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tools/scripts/smoke-gpui-paste-text.ps1") -OverlayDelayMs $SmokeDelayMs -PasteDelayMs $SmokeDelayMs -AllowForegroundUnavailable
+            } -Retries 1
 
-        Invoke-Step "smoke-link-paste" {
-            powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tools/scripts/smoke-gpui-paste-link.ps1") -OverlayDelayMs $SmokeDelayMs -PasteDelayMs $SmokeDelayMs -AllowForegroundUnavailable
-        } -Retries 1
+            Invoke-Step "smoke-link-paste" {
+                powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tools/scripts/smoke-gpui-paste-link.ps1") -OverlayDelayMs $SmokeDelayMs -PasteDelayMs $SmokeDelayMs -AllowForegroundUnavailable
+            } -Retries 1
 
-        Invoke-Step "smoke-image-paste" {
-            powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tools/scripts/smoke-gpui-paste-image.ps1") -OverlayDelayMs $SmokeDelayMs -PasteDelayMs $SmokeDelayMs -AllowForegroundUnavailable
-        } -Retries 1
+            Invoke-Step "smoke-image-paste" {
+                powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tools/scripts/smoke-gpui-paste-image.ps1") -OverlayDelayMs $SmokeDelayMs -PasteDelayMs $SmokeDelayMs -AllowForegroundUnavailable
+            } -Retries 1
 
-        Invoke-Step "smoke-tray-show-exit" {
-            powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tools/scripts/smoke-gpui-tray.ps1")
-        } -Retries 1
+            Invoke-Step "smoke-file-paste" {
+                powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tools/scripts/smoke-gpui-paste-file.ps1") -OverlayDelayMs $SmokeDelayMs -PasteDelayMs $SmokeDelayMs -AllowForegroundUnavailable
+            } -Retries 1
 
-        Invoke-Step "smoke-tray-rect" {
-            powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tools/scripts/probe-gpui-tray-rect.ps1") -AllowUnavailable
-        } -Retries 1
+            Invoke-Step "smoke-tray-show-exit" {
+                powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tools/scripts/smoke-gpui-tray.ps1")
+            } -Retries 1
 
-        Invoke-Step "smoke-tray-notification" {
-            powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tools/scripts/smoke-gpui-tray-notification.ps1") -AllowPopupUnavailable
-        } -Retries 1
+            Invoke-Step "smoke-tray-rect" {
+                powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tools/scripts/probe-gpui-tray-rect.ps1") -AllowUnavailable
+            } -Retries 1
 
-        Invoke-Step "smoke-tray-restart" {
-            powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tools/scripts/smoke-gpui-tray-restart.ps1")
-        } -Retries 1
+            Invoke-Step "smoke-tray-notification" {
+                powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tools/scripts/smoke-gpui-tray-notification.ps1") -AllowPopupUnavailable
+            } -Retries 1
+
+            Invoke-Step "smoke-tray-restart" {
+                powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tools/scripts/smoke-gpui-tray-restart.ps1")
+            } -Retries 1
+        }
+        finally {
+            $env:LOCALAPPDATA = $originalLocalAppData
+            if ($null -eq $originalPasteDataDir) {
+                Remove-Item Env:\PASTE_GPUI_DATA_DIR -ErrorAction SilentlyContinue
+            }
+            else {
+                $env:PASTE_GPUI_DATA_DIR = $originalPasteDataDir
+            }
+
+            if ($null -eq $originalPasteEnableMotion) {
+                Remove-Item Env:\PASTE_GPUI_ENABLE_MOTION -ErrorAction SilentlyContinue
+            }
+            else {
+                $env:PASTE_GPUI_ENABLE_MOTION = $originalPasteEnableMotion
+            }
+        }
     }
 
     if (-not $SkipOfflineInstaller) {

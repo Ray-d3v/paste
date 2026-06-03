@@ -25,7 +25,7 @@ $keyboardSource = @'
 using System;
 using System.Runtime.InteropServices;
 
-public static class PasteLinkSmokeKeyboard
+public static class PasteFileSmokeKeyboard
 {
     [DllImport("user32.dll", SetLastError = true)]
     static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
@@ -144,8 +144,13 @@ public static class PasteLinkSmokeKeyboard
 }
 '@
 
-if (-not ("PasteLinkSmokeKeyboard" -as [type])) {
+if (-not ("PasteFileSmokeKeyboard" -as [type])) {
     Add-Type -TypeDefinition $keyboardSource
+}
+
+function Normalize-PathForSmoke {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    return ([System.IO.Path]::GetFullPath($Path)).TrimEnd('\').ToLowerInvariant()
 }
 
 function Activate-WindowByProcessId {
@@ -159,7 +164,7 @@ function Activate-WindowByProcessId {
         $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
         if ($process -ne $null) {
             $process.Refresh()
-            if ($process.MainWindowHandle -ne [IntPtr]::Zero -and [PasteLinkSmokeKeyboard]::Activate($process.MainWindowHandle)) {
+            if ($process.MainWindowHandle -ne [IntPtr]::Zero -and [PasteFileSmokeKeyboard]::Activate($process.MainWindowHandle)) {
                 Start-Sleep -Milliseconds 250
                 return $true
             }
@@ -177,14 +182,30 @@ function Activate-WindowByProcessId {
     return $false
 }
 
-function Start-SmokeTextTarget {
+function Set-SmokeClipboardFiles {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$FilePaths
+    )
+
+    Add-Type -AssemblyName System.Windows.Forms
+    $collection = New-Object System.Collections.Specialized.StringCollection
+    foreach ($path in $FilePaths) {
+        [void]$collection.Add($path)
+    }
+
+    [System.Windows.Forms.Clipboard]::Clear()
+    [System.Windows.Forms.Clipboard]::SetFileDropList($collection)
+}
+
+function Start-SmokeFileTarget {
     param(
         [Parameter(Mandatory = $true)]
         [string]$ResultPath,
         [int]$Retries = 16
     )
 
-    $targetScript = Join-Path ([System.IO.Path]::GetTempPath()) "paste-gpui-link-target-$([Guid]::NewGuid().ToString("N")).ps1"
+    $targetScript = Join-Path ([System.IO.Path]::GetTempPath()) "paste-gpui-file-target-$([Guid]::NewGuid().ToString("N")).ps1"
     $targetSource = @'
 param(
     [Parameter(Mandatory = $true)]
@@ -194,34 +215,77 @@ param(
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-$form = New-Object System.Windows.Forms.Form
-$form.Text = "Paste GPUI Link Smoke Target"
-$form.Width = 720
-$form.Height = 240
-$form.StartPosition = "CenterScreen"
-$form.TopMost = $false
+$source = @"
+using System;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Windows.Forms;
 
-$textBox = New-Object System.Windows.Forms.TextBox
-$textBox.Multiline = $true
-$textBox.AcceptsReturn = $true
-$textBox.AcceptsTab = $true
-$textBox.Dock = [System.Windows.Forms.DockStyle]::Fill
-$textBox.Font = New-Object System.Drawing.Font("Consolas", 12)
-$form.Controls.Add($textBox)
+public sealed class PasteFileSmokeForm : Form
+{
+    private readonly PasteFileSmokeBox box;
 
-$timer = New-Object System.Windows.Forms.Timer
-$timer.Interval = 200
-$timer.Add_Tick({
-    [System.IO.File]::WriteAllText($ResultPath, $textBox.Text, [System.Text.Encoding]::UTF8)
-})
-$timer.Start()
+    public PasteFileSmokeForm(string resultPath)
+    {
+        Text = "Paste GPUI File Smoke Target";
+        Width = 520;
+        Height = 240;
+        StartPosition = FormStartPosition.CenterScreen;
+        TopMost = false;
 
-$form.Add_Shown({
-    $form.Activate()
-    $textBox.Focus()
-})
+        box = new PasteFileSmokeBox(resultPath);
+        box.Dock = DockStyle.Fill;
+        Controls.Add(box);
+        Shown += delegate
+        {
+            Activate();
+            box.Focus();
+        };
+    }
+}
 
-[System.Windows.Forms.Application]::Run($form)
+public sealed class PasteFileSmokeBox : Control
+{
+    private const int WM_PASTE = 0x0302;
+    private readonly string resultPath;
+
+    public PasteFileSmokeBox(string resultPath)
+    {
+        this.resultPath = resultPath;
+        SetStyle(ControlStyles.Selectable, true);
+        TabStop = true;
+        BackColor = System.Drawing.Color.White;
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == WM_PASTE)
+        {
+            CaptureClipboardFiles();
+            return;
+        }
+
+        base.WndProc(ref m);
+    }
+
+    private void CaptureClipboardFiles()
+    {
+        if (!Clipboard.ContainsFileDropList())
+        {
+            File.WriteAllText(resultPath, "contains_file_drop_list=false", Encoding.UTF8);
+            return;
+        }
+
+        string[] files = Clipboard.GetFileDropList().Cast<string>().ToArray();
+        string value = "contains_file_drop_list=true;count=" + files.Length + ";paths=" + string.Join("|", files);
+        File.WriteAllText(resultPath, value, Encoding.UTF8);
+    }
+}
+"@
+
+Add-Type -TypeDefinition $source -ReferencedAssemblies System.Windows.Forms,System.Drawing
+[System.Windows.Forms.Application]::Run([PasteFileSmokeForm]::new($ResultPath))
 '@
     Set-Content -LiteralPath $targetScript -Value $targetSource -Encoding UTF8
 
@@ -252,42 +316,10 @@ $form.Add_Shown({
     return $launcher
 }
 
-function Read-LatestHistoryEntry {
-    $historyPath = Join-Path $env:LOCALAPPDATA "PasteGPUI\history.json"
-    if (-not (Test-Path $historyPath)) {
-        return $null
-    }
-
-    $document = Get-Content -LiteralPath $historyPath -Raw | ConvertFrom-Json
-    if ($document.entries.Count -eq 0) {
-        return $null
-    }
-
-    return $document.entries[0]
-}
-
-function Get-OptionalJsonProperty {
-    param(
-        [AllowNull()]$Object,
-        [Parameter(Mandatory = $true)][string]$Name
-    )
-
-    if ($null -eq $Object) {
-        return $null
-    }
-
-    $property = $Object.PSObject.Properties[$Name]
-    if ($null -eq $property) {
-        return $null
-    }
-
-    return $property.Value
-}
-
-function Find-HistoryEntryByUrl {
+function Find-HistoryEntryByFilePaths {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Url
+        [string[]]$FilePaths
     )
 
     $historyPath = Join-Path $env:LOCALAPPDATA "PasteGPUI\history.json"
@@ -295,10 +327,27 @@ function Find-HistoryEntryByUrl {
         return $null
     }
 
+    $expected = @($FilePaths | ForEach-Object { Normalize-PathForSmoke $_ })
     $document = Get-Content -LiteralPath $historyPath -Raw | ConvertFrom-Json
     foreach ($entry in @($document.entries)) {
-        $linkUrl = Get-OptionalJsonProperty -Object $entry -Name "link_url"
-        if ($entry.kind -eq "Link" -and $entry.content -eq $Url -and $linkUrl -eq $Url) {
+        if ($entry.kind -ne "File") {
+            continue
+        }
+
+        $actual = @($entry.file_paths | ForEach-Object { Normalize-PathForSmoke $_ })
+        if ($actual.Count -ne $expected.Count) {
+            continue
+        }
+
+        $allMatch = $true
+        for ($index = 0; $index -lt $expected.Count; $index++) {
+            if ($actual[$index] -ne $expected[$index]) {
+                $allMatch = $false
+                break
+            }
+        }
+
+        if ($allMatch) {
             return $entry
         }
     }
@@ -306,16 +355,55 @@ function Find-HistoryEntryByUrl {
     return $null
 }
 
+function Test-PastedFilesMatch {
+    param(
+        [string]$CapturedResult,
+        [string[]]$ExpectedPaths
+    )
+
+    if ($CapturedResult -notlike "contains_file_drop_list=true;*") {
+        return $false
+    }
+
+    $prefix = "contains_file_drop_list=true;count=$($ExpectedPaths.Count);paths="
+    if (-not $CapturedResult.StartsWith($prefix, [System.StringComparison]::Ordinal)) {
+        return $false
+    }
+
+    $capturedPaths = @($CapturedResult.Substring($prefix.Length).Split('|') | ForEach-Object { Normalize-PathForSmoke $_ })
+    $expected = @($ExpectedPaths | ForEach-Object { Normalize-PathForSmoke $_ })
+    if ($capturedPaths.Count -ne $expected.Count) {
+        return $false
+    }
+
+    for ($index = 0; $index -lt $expected.Count; $index++) {
+        if ($capturedPaths[$index] -ne $expected[$index]) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
 $pasteProcess = $null
 $targetProcess = $null
-$targetResultPath = Join-Path ([System.IO.Path]::GetTempPath()) "paste-gpui-link-result-$([Guid]::NewGuid().ToString("N")).txt"
-$uniqueUrl = "https://example.com/paste-gpui-smoke/$([Guid]::NewGuid().ToString("N"))?source=link-smoke"
-$capturedText = $null
-$latestEntry = $null
+$targetResultPath = Join-Path ([System.IO.Path]::GetTempPath()) "paste-gpui-file-result-$([Guid]::NewGuid().ToString("N")).txt"
+$smokeDir = Join-Path ([System.IO.Path]::GetTempPath()) "paste-gpui-file-source-$([Guid]::NewGuid().ToString("N"))"
+$filePaths = @()
+$capturedResult = $null
+$matchingEntry = $null
 $pasteVerified = $false
 $historyVerified = $false
 
 try {
+    New-Item -ItemType Directory -Path $smokeDir -Force | Out-Null
+    $filePaths = @(
+        (Join-Path $smokeDir "paste-file-a.txt"),
+        (Join-Path $smokeDir "paste-file-b.log")
+    )
+    Set-Content -LiteralPath $filePaths[0] -Value "paste file smoke a" -Encoding UTF8
+    Set-Content -LiteralPath $filePaths[1] -Value "paste file smoke b" -Encoding UTF8
+
     Get-Process -Name "PasteWinUI" -ErrorAction SilentlyContinue | Stop-Process -Force
     Start-Sleep -Milliseconds 250
 
@@ -327,7 +415,7 @@ try {
         throw "PasteWinUI exited during startup. ExitCode=$($pasteProcess.ExitCode)"
     }
 
-    $targetProcess = Start-SmokeTextTarget -ResultPath $targetResultPath
+    $targetProcess = Start-SmokeFileTarget -ResultPath $targetResultPath
 
     if (-not (Activate-WindowByProcessId -ProcessId $targetProcess.Id)) {
         if ($AllowForegroundUnavailable) {
@@ -339,36 +427,31 @@ try {
                 paste_process_alive = -not $pasteProcess.HasExited
                 target_process_alive = -not $targetProcess.HasExited
                 target_result_path = $targetResultPath
+                source_file_paths = $filePaths
             }
-            $status | ConvertTo-Json -Depth 3
-            Write-Warning "Unable to activate link smoke target in this automation session. Physical paste acceptance is still required."
+            $status | ConvertTo-Json -Depth 4
+            Write-Warning "Unable to activate file smoke target in this automation session. Physical paste acceptance is still required."
             return
         }
-        throw "Unable to activate link smoke target process $($targetProcess.Id)."
+        throw "Unable to activate file smoke target process $($targetProcess.Id)."
     }
 
-    Set-Clipboard -Value $uniqueUrl
+    Set-SmokeClipboardFiles -FilePaths $filePaths
     Start-Sleep -Milliseconds $ClipboardDelayMs
 
     if (-not (Activate-WindowByProcessId -ProcessId $targetProcess.Id)) {
+        $matchingEntry = Find-HistoryEntryByFilePaths -FilePaths $filePaths
+        $historyVerified = $matchingEntry -ne $null
         if ($AllowForegroundUnavailable) {
-            $latestEntry = Read-LatestHistoryEntry
-            $matchingEntry = Find-HistoryEntryByUrl -Url $uniqueUrl
-            $historyVerified =
-                $matchingEntry -ne $null
             $status = [ordered]@{
                 exe = $ExePath
                 paste_process_id = $pasteProcess.Id
                 target_process_id = $targetProcess.Id
                 foreground_activation_available = $false
                 stage = "reactivate-before-hotkey"
-                unique_url = $uniqueUrl
-                latest_history_kind = if ($latestEntry -ne $null) { $latestEntry.kind } else { $null }
-                latest_history_content = if ($latestEntry -ne $null) { $latestEntry.content } else { $null }
-                latest_history_link_url = Get-OptionalJsonProperty -Object $latestEntry -Name "link_url"
+                source_file_paths = $filePaths
                 matching_history_kind = if ($matchingEntry -ne $null) { $matchingEntry.kind } else { $null }
-                matching_history_content = if ($matchingEntry -ne $null) { $matchingEntry.content } else { $null }
-                matching_history_link_url = Get-OptionalJsonProperty -Object $matchingEntry -Name "link_url"
+                matching_history_file_paths = if ($matchingEntry -ne $null) { @($matchingEntry.file_paths) } else { $null }
                 history_verified = $historyVerified
                 paste_process_alive = -not $pasteProcess.HasExited
                 target_process_alive = -not $targetProcess.HasExited
@@ -376,46 +459,41 @@ try {
             }
             $status | ConvertTo-Json -Depth 4
             if (-not $historyVerified) {
-                throw "Latest history entry was not the expected Link item."
+                throw "History did not contain the expected File item."
             }
-            Write-Warning "Unable to reactivate link smoke target in this automation session. Physical paste acceptance is still required."
+            Write-Warning "Unable to reactivate file smoke target in this automation session. Physical paste acceptance is still required."
             return
         }
-        throw "Unable to reactivate link smoke target before hotkey."
+        throw "Unable to reactivate file smoke target before hotkey."
     }
 
-    [PasteLinkSmokeKeyboard]::CtrlAltV()
+    [PasteFileSmokeKeyboard]::CtrlAltV()
     Start-Sleep -Milliseconds $OverlayDelayMs
-    if (-not [PasteLinkSmokeKeyboard]::IsOverlayVisible()) {
-        [void][PasteLinkSmokeKeyboard]::PostHotkeyToMessageWindow()
+    if (-not [PasteFileSmokeKeyboard]::IsOverlayVisible()) {
+        [void][PasteFileSmokeKeyboard]::PostHotkeyToMessageWindow()
         Start-Sleep -Milliseconds $OverlayDelayMs
     }
-    [PasteLinkSmokeKeyboard]::Enter()
-    [void][PasteLinkSmokeKeyboard]::PostEnterToOverlay()
+    [PasteFileSmokeKeyboard]::Enter()
+    [void][PasteFileSmokeKeyboard]::PostEnterToOverlay()
     Start-Sleep -Milliseconds $PasteDelayMs
     Start-Sleep -Milliseconds 500
 
     if (Test-Path $targetResultPath) {
-        $capturedText = [System.IO.File]::ReadAllText($targetResultPath, [System.Text.Encoding]::UTF8)
+        $capturedResult = [System.IO.File]::ReadAllText($targetResultPath, [System.Text.Encoding]::UTF8)
     }
 
-    $latestEntry = Read-LatestHistoryEntry
-    $matchingEntry = Find-HistoryEntryByUrl -Url $uniqueUrl
-    $pasteVerified = $capturedText -eq $uniqueUrl
+    $matchingEntry = Find-HistoryEntryByFilePaths -FilePaths $filePaths
+    $pasteVerified = Test-PastedFilesMatch -CapturedResult $capturedResult -ExpectedPaths $filePaths
     $historyVerified = $matchingEntry -ne $null
 
     $status = [ordered]@{
         exe = $ExePath
         paste_process_id = $pasteProcess.Id
         target_process_id = $targetProcess.Id
-        unique_url = $uniqueUrl
-        captured_text = $capturedText
-        latest_history_kind = if ($latestEntry -ne $null) { $latestEntry.kind } else { $null }
-        latest_history_content = if ($latestEntry -ne $null) { $latestEntry.content } else { $null }
-        latest_history_link_url = Get-OptionalJsonProperty -Object $latestEntry -Name "link_url"
+        source_file_paths = $filePaths
+        captured_result = $capturedResult
         matching_history_kind = if ($matchingEntry -ne $null) { $matchingEntry.kind } else { $null }
-        matching_history_content = if ($matchingEntry -ne $null) { $matchingEntry.content } else { $null }
-        matching_history_link_url = Get-OptionalJsonProperty -Object $matchingEntry -Name "link_url"
+        matching_history_file_paths = if ($matchingEntry -ne $null) { @($matchingEntry.file_paths) } else { $null }
         paste_verified = $pasteVerified
         history_verified = $historyVerified
         paste_process_alive = -not $pasteProcess.HasExited
@@ -427,14 +505,14 @@ try {
 
     if (-not $pasteVerified) {
         if ($AllowForegroundUnavailable) {
-            Write-Warning "Link smoke target content or history did not match in this automation session. Physical paste acceptance is still required."
+            Write-Warning "File smoke target did not receive the expected CF_HDROP file list in this automation session. Physical paste acceptance is still required."
             return
         }
-        throw "Link smoke target content did not match the selected URL."
+        throw "File smoke target did not receive the expected CF_HDROP file list."
     }
 
     if (-not $historyVerified) {
-        throw "Latest history entry was not the expected Link item."
+        throw "History did not contain the expected File item."
     }
 }
 finally {
@@ -452,5 +530,6 @@ finally {
         }
 
         Remove-Item -LiteralPath $targetResultPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $smokeDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
